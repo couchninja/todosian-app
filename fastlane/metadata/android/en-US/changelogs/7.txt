@@ -1,0 +1,6 @@
+• New Daily Focus screen — tap the banner to see all tasks matching your focus mode
+• Tappable focus banner on the home screen
+• Reusable TodoRow component
+• Fixed resource loading for better reliability
+• Updated core dependencies
+• Priority rank moved to the Todo model
