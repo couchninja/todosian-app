@@ -67,6 +67,7 @@ import com.isotjs.todosian.data.FileRepository
 import com.isotjs.todosian.data.model.Todo
 import com.isotjs.todosian.data.model.priorityRank
 import com.isotjs.todosian.data.settings.AppSettingsRepository
+import com.isotjs.todosian.data.settings.NewTodoFilePosition
 import com.isotjs.todosian.data.settings.TodoGrouping
 import com.isotjs.todosian.data.settings.TodoSort
 import com.isotjs.todosian.ui.components.TasksMetaEditor
@@ -223,6 +224,7 @@ fun CategoryScreen(
                                     text = sheetText,
                                     meta = if (settings.enableTasksPluginSupport) sheetMeta else null,
                                     enableTasksPluginSupport = settings.enableTasksPluginSupport,
+                                    addAtStart = settings.newTodoFilePosition == NewTodoFilePosition.TOP,
                                 )
 
                                 is TodoSheetMode.Edit -> viewModel.editTodo(

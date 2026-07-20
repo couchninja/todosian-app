@@ -72,6 +72,7 @@ import com.isotjs.todosian.data.settings.AppSettings
 import com.isotjs.todosian.data.settings.AppSettingsRepository
 import com.isotjs.todosian.data.settings.CategorySort
 import com.isotjs.todosian.data.settings.DailyFocusMode
+import com.isotjs.todosian.data.settings.NewTodoFilePosition
 import com.isotjs.todosian.data.settings.ThemeMode
 import com.isotjs.todosian.data.settings.TodoGrouping
 import com.isotjs.todosian.data.settings.TodoSort
@@ -133,6 +134,7 @@ fun SettingsScreen(
     var showSortDialog by remember { mutableStateOf(false) }
     var showGroupingDialog by remember { mutableStateOf(false) }
     var showTodoSortDialog by remember { mutableStateOf(false) }
+    var showNewTodoFilePositionDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showDailyFocusModeDialog by remember { mutableStateOf(false) }
 
@@ -188,6 +190,19 @@ fun SettingsScreen(
             selected = settings.todoSort,
             onSelected = { appSettingsRepository.setTodoSort(it) },
             onDismiss = { showTodoSortDialog = false },
+        )
+    }
+
+    if (showNewTodoFilePositionDialog) {
+        SingleChoiceDialog(
+            title = stringResource(R.string.settings_new_todo_file_position),
+            options = listOf(
+                ChoiceOption(NewTodoFilePosition.TOP, stringResource(R.string.settings_new_todo_file_position_top)),
+                ChoiceOption(NewTodoFilePosition.BOTTOM, stringResource(R.string.settings_new_todo_file_position_bottom)),
+            ),
+            selected = settings.newTodoFilePosition,
+            onSelected = { appSettingsRepository.setNewTodoFilePosition(it) },
+            onDismiss = { showNewTodoFilePositionDialog = false },
         )
     }
 
@@ -572,6 +587,28 @@ fun SettingsScreen(
                             .clickable { showTodoSortDialog = true }
                             .padding(horizontal = 4.dp),
                     )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    ListItem(
+                        headlineContent = { Text(text = stringResource(R.string.settings_new_todo_file_position)) },
+                        supportingContent = {
+                            Text(text = newTodoFilePositionLabel(settings.newTodoFilePosition))
+                        },
+                        leadingContent = { Icon(imageVector = Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
+                        trailingContent = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showNewTodoFilePositionDialog = true }
+                            .padding(horizontal = 4.dp),
+                    )
                 }
             }
 
@@ -714,6 +751,14 @@ private fun todoSortLabel(sort: TodoSort): String {
         TodoSort.PRIORITY_HIGH_TO_LOW -> stringResource(R.string.settings_todo_sort_priority_desc)
         TodoSort.CREATED_DATE_NEWEST_FIRST -> stringResource(R.string.settings_todo_sort_created_newest)
         TodoSort.DUE_DATE_EARLIEST_FIRST -> stringResource(R.string.settings_todo_sort_due_earliest)
+    }
+}
+
+@Composable
+private fun newTodoFilePositionLabel(position: NewTodoFilePosition): String {
+    return when (position) {
+        NewTodoFilePosition.TOP -> stringResource(R.string.settings_new_todo_file_position_top)
+        NewTodoFilePosition.BOTTOM -> stringResource(R.string.settings_new_todo_file_position_bottom)
     }
 }
 

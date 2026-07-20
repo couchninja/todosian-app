@@ -19,6 +19,7 @@ interface AppSettingsRepository {
     fun setCategorySort(sort: CategorySort)
     fun setTodoGrouping(grouping: TodoGrouping)
     fun setTodoSort(sort: TodoSort)
+    fun setNewTodoFilePosition(position: NewTodoFilePosition)
 
     fun setEnableTasksPluginSupport(enabled: Boolean)
 
@@ -76,6 +77,10 @@ class SharedPrefsAppSettingsRepository(
         prefs.edit { putString(KEY_TODO_SORT, sort.name) }
     }
 
+    override fun setNewTodoFilePosition(position: NewTodoFilePosition) {
+        prefs.edit { putString(KEY_NEW_TODO_FILE_POSITION, position.name) }
+    }
+
     override fun setEnableTasksPluginSupport(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_TASKS_PLUGIN, enabled) }
     }
@@ -101,6 +106,10 @@ class SharedPrefsAppSettingsRepository(
             runCatching { TodoSort.valueOf(raw) }.getOrNull()
         } ?: TodoSort.FILE_ORDER
 
+        val newTodoFilePosition = prefs.getString(KEY_NEW_TODO_FILE_POSITION, null)?.let { raw ->
+            runCatching { NewTodoFilePosition.valueOf(raw) }.getOrNull()
+        } ?: NewTodoFilePosition.BOTTOM
+
         return AppSettings(
             themeMode = themeMode,
             dynamicColorEnabled = prefs.getBoolean(KEY_DYNAMIC_COLOR, true),
@@ -111,6 +120,7 @@ class SharedPrefsAppSettingsRepository(
             categorySort = categorySort,
             todoGrouping = todoGrouping,
             todoSort = todoSort,
+            newTodoFilePosition = newTodoFilePosition,
             enableTasksPluginSupport = prefs.getBoolean(KEY_TASKS_PLUGIN, false),
             tasksPluginUseEmojisInUi = prefs.getBoolean(KEY_TASKS_PLUGIN_UI_EMOJIS, false),
         )
@@ -126,6 +136,7 @@ class SharedPrefsAppSettingsRepository(
         private const val KEY_CATEGORY_SORT = "category_sort"
         private const val KEY_TODO_GROUPING = "todo_grouping"
         private const val KEY_TODO_SORT = "todo_sort"
+        private const val KEY_NEW_TODO_FILE_POSITION = "new_todo_file_position"
 
         private const val KEY_TASKS_PLUGIN = "tasks_plugin_support"
 

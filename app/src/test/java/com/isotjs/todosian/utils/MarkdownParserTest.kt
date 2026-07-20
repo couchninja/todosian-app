@@ -98,6 +98,21 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun addTodo_prepends_todo_line_when_addAtStart() {
+        val lines = listOf(
+            "# Notes",
+            "Some text",
+        )
+
+        val updated = MarkdownParser.addTodo(lines, text = "New thing", addAtStart = true)
+
+        assertEquals(3, updated.size)
+        assertEquals("- [ ] New thing", updated[0])
+        assertEquals("# Notes", updated[1])
+        assertEquals("Some text", updated[2])
+    }
+
+    @Test
     fun addSubTodo_inserts_after_parent_block() {
         val lines = listOf(
             "- [ ] Parent",

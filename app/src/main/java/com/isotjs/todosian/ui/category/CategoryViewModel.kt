@@ -150,6 +150,7 @@ class CategoryViewModel(
         text: String,
         meta: MarkdownParser.TasksMeta?,
         enableTasksPluginSupport: Boolean,
+        addAtStart: Boolean = false,
     ) {
         viewModelScope.launch {
             val previousLines = _uiState.value.lines
@@ -158,6 +159,7 @@ class CategoryViewModel(
                 text = text,
                 meta = meta,
                 enableTasksPlugin = enableTasksPluginSupport,
+                addAtStart = addAtStart,
             )
             if (newLines == previousLines) return@launch
 

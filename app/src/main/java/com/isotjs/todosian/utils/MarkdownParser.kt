@@ -120,6 +120,7 @@ object MarkdownParser {
         text: String,
         meta: TasksMeta? = null,
         enableTasksPlugin: Boolean = false,
+        addAtStart: Boolean = false,
     ): List<String> {
         val cleaned = text.trim()
         if (cleaned.isEmpty()) return lines
@@ -132,7 +133,9 @@ object MarkdownParser {
         )
 
         if (lines.isEmpty()) return listOf(newLine)
-        return lines.toMutableList().apply { add(newLine) }
+        return lines.toMutableList().apply {
+            if (addAtStart) add(0, newLine) else add(newLine)
+        }
     }
 
     fun addSubTodo(

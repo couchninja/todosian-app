@@ -8,6 +8,7 @@ data class AppSettings(
     val categorySort: CategorySort = CategorySort.A_Z,
     val todoGrouping: TodoGrouping = TodoGrouping.GROUPED,
     val todoSort: TodoSort = TodoSort.FILE_ORDER,
+    val newTodoFilePosition: NewTodoFilePosition = NewTodoFilePosition.BOTTOM,
     val enableTasksPluginSupport: Boolean = false,
     val tasksPluginUseEmojisInUi: Boolean = false,
 )
@@ -39,4 +40,9 @@ enum class TodoSort {
     PRIORITY_HIGH_TO_LOW,
     CREATED_DATE_NEWEST_FIRST,
     DUE_DATE_EARLIEST_FIRST,
+}
+
+enum class NewTodoFilePosition {
+    TOP,
+    BOTTOM,
 }
