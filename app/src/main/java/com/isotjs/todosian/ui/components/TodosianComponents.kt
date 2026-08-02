@@ -16,6 +16,18 @@ object TodosianDimens {
     val ScreenHorizontalPadding: Dp = 16.dp
     val CardPadding: Dp = 16.dp
     val ProgressHeight: Dp = 6.dp
+
+    /** Per-level nest indent in todo lists (non-compact). */
+    val TodoIndentStep: Dp = 20.dp
+    val TodoIndentStepCompact: Dp = 12.dp
+    val TodoIndentMax: Dp = 80.dp
+    val TodoIndentMaxCompact: Dp = 48.dp
+
+    fun todoIndentPadding(indentLevel: Int, compact: Boolean = false): Dp {
+        val step = if (compact) TodoIndentStepCompact else TodoIndentStep
+        val max = if (compact) TodoIndentMaxCompact else TodoIndentMax
+        return (step * indentLevel).coerceAtMost(max)
+    }
 }
 
 @Composable

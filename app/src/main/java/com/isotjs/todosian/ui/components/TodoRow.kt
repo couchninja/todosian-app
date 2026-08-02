@@ -9,13 +9,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,7 +57,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -101,9 +107,6 @@ fun TodoRow(
     /** For ghosts: every nested todo under this ancestor is done. */
     allDescendantsDone: Boolean = false,
 ) {
-    val indentStep = if (compact) 8 else 12
-    val indentMax = if (compact) 32 else 48
-    val indentPadding = (todo.indentLevel * indentStep).coerceAtMost(indentMax).dp
     val rowCorner = if (compact) 8.dp else 16.dp
 
     val body: @Composable () -> Unit = {
@@ -121,17 +124,6 @@ fun TodoRow(
             allDescendantsDone = allDescendantsDone,
             rowCorner = rowCorner,
         )
-    }
-
-    // Ghosts are structural only: no swipe chrome (avoids delete-icon bleed through fade).
-    if (isGhost) {
-        Box(
-            modifier = modifier
-                .padding(start = indentPadding)
-                .graphicsLayer { alpha = GhostRowAlpha },
-            content = { body() },
-        )
-        return
     }
 
     val currentOnRequestDelete by rememberUpdatedState(onRequestDelete)
@@ -155,57 +147,133 @@ fun TodoRow(
         },
     )
 
-    SwipeToDismissBox(
-        modifier = modifier.padding(start = indentPadding),
-        state = dismissState,
-        enableDismissFromStartToEnd = enableSwipe && allowMove && todo.indentLevel == 0,
-        enableDismissFromEndToStart = enableSwipe,
-        backgroundContent = {
-            val backgroundColor = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
-                SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.secondaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainer
-            }
-            val icon = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
-                SwipeToDismissBoxValue.StartToEnd -> Icons.AutoMirrored.Outlined.ArrowForward
-                else -> null
-            }
-            val contentColor = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.onErrorContainer
-                SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.onSecondaryContainer
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            val alignment = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                else -> Alignment.CenterEnd
-            }
+    TodoIndentGutter(
+        indentLevel = todo.indentLevel,
+        compact = compact,
+        modifier = modifier,
+    ) {
+        // Ghosts are structural only: no swipe chrome (avoids delete-icon bleed through fade).
+        if (isGhost) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        color = backgroundColor,
-                        shape = RoundedCornerShape(rowCorner),
-                    )
-                    .padding(horizontal = if (compact) 12.dp else 16.dp),
-                contentAlignment = alignment,
-            ) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
-                            stringResource(R.string.category_move_title)
-                        } else {
-                            stringResource(R.string.cd_delete)
-                        },
-                        tint = contentColor,
-                    )
-                }
-            }
-        },
-        content = { body() },
-    )
+                modifier = Modifier.graphicsLayer { alpha = GhostRowAlpha },
+                content = { body() },
+            )
+        } else {
+            SwipeToDismissBox(
+                modifier = Modifier.fillMaxWidth(),
+                state = dismissState,
+                enableDismissFromStartToEnd = enableSwipe && allowMove && todo.indentLevel == 0,
+                enableDismissFromEndToStart = enableSwipe,
+                backgroundContent = {
+                    val backgroundColor = when (dismissState.targetValue) {
+                        SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+                        SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainer
+                    }
+                    val icon = when (dismissState.targetValue) {
+                        SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
+                        SwipeToDismissBoxValue.StartToEnd -> Icons.AutoMirrored.Outlined.ArrowForward
+                        else -> null
+                    }
+                    val contentColor = when (dismissState.targetValue) {
+                        SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.onErrorContainer
+                        SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.onSecondaryContainer
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    val alignment = when (dismissState.targetValue) {
+                        SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                        SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                        else -> Alignment.CenterEnd
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                color = backgroundColor,
+                                shape = RoundedCornerShape(rowCorner),
+                            )
+                            .padding(horizontal = if (compact) 12.dp else 16.dp),
+                        contentAlignment = alignment,
+                    ) {
+                        if (icon != null) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
+                                    stringResource(R.string.category_move_title)
+                                } else {
+                                    stringResource(R.string.cd_delete)
+                                },
+                                tint = contentColor,
+                            )
+                        }
+                    }
+                },
+                content = { body() },
+            )
+        }
+    }
+}
+
+/**
+ * Indents [content] and draws a thin vertical guide rail per visible nest level
+ * so hierarchy is easier to scan without widening the indent step.
+ */
+@Composable
+private fun TodoIndentGutter(
+    indentLevel: Int,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    if (indentLevel <= 0) {
+        Box(modifier = modifier, content = { content() })
+        return
+    }
+
+    val indentStep = if (compact) {
+        TodosianDimens.TodoIndentStepCompact
+    } else {
+        TodosianDimens.TodoIndentStep
+    }
+    val indentPadding = TodosianDimens.todoIndentPadding(indentLevel, compact)
+    val stepsShown = (indentPadding / indentStep).toInt().coerceAtLeast(1)
+    val railColor = MaterialTheme.colorScheme.outlineVariant
+    val railWidth = 2.dp
+    val railInsetFromStepStart = if (compact) 2.dp else 4.dp
+    val railVerticalPadding = if (compact) 2.dp else 4.dp
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(indentPadding)
+                .fillMaxHeight()
+                .drawBehind {
+                    val railW = railWidth.toPx()
+                    val inset = railInsetFromStepStart.toPx()
+                    val vPad = railVerticalPadding.toPx()
+                    val stepPx = indentStep.toPx()
+                    val top = vPad
+                    val bottom = (size.height - vPad).coerceAtLeast(top)
+                    for (stepIndex in 0 until stepsShown) {
+                        val x = stepIndex * stepPx + inset + railW / 2f
+                        drawLine(
+                            color = railColor,
+                            start = Offset(x, top),
+                            end = Offset(x, bottom),
+                            strokeWidth = railW,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                },
+        )
+        Box(modifier = Modifier.weight(1f)) {
+            content()
+        }
+    }
 }
 
 @Composable

@@ -1085,7 +1085,7 @@ private fun DropIndicatorLine(
     indentLevel: Int,
     modifier: Modifier = Modifier,
 ) {
-    val startPadding = (indentLevel * 12).coerceAtMost(48).dp
+    val startPadding = TodosianDimens.todoIndentPadding(indentLevel)
     Box(
         modifier = modifier
             .fillMaxWidth()
