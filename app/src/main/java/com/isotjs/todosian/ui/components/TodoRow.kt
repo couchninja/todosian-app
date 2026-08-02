@@ -44,6 +44,7 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -54,14 +55,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.isotjs.todosian.R
 import com.isotjs.todosian.data.model.TasksPriority
@@ -71,6 +75,9 @@ import java.time.LocalDate
 
 /** Shorter than the system long-press so reorder feels snappy but quick swipes still scroll. */
 private const val DragHandlePressTimeoutMs = 50L
+
+/** Opacity for incomplete ancestors shown in the Completed section. */
+private const val GhostRowAlpha = 0.4f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,23 +96,44 @@ fun TodoRow(
     dragHandleModifier: Modifier? = null,
     enableSwipe: Boolean = true,
     compact: Boolean = false,
+    /** Incomplete ancestor shown in Completed for tree context only. */
+    isGhost: Boolean = false,
+    /** For ghosts: every nested todo under this ancestor is done. */
+    allDescendantsDone: Boolean = false,
 ) {
     val indentStep = if (compact) 8 else 12
     val indentMax = if (compact) 32 else 48
     val indentPadding = (todo.indentLevel * indentStep).coerceAtMost(indentMax).dp
     val rowCorner = if (compact) 8.dp else 16.dp
-    val rowHorizontalPadding = if (compact) 8.dp else 12.dp
-    val rowVerticalPadding = if (compact) 2.dp else 10.dp
-    val rowSpacing = if (compact) 6.dp else 12.dp
-    val textStyle = if (compact) {
-        MaterialTheme.typography.bodyMedium
-    } else {
-        MaterialTheme.typography.bodyLarge
+
+    val body: @Composable () -> Unit = {
+        TodoRowBody(
+            todo = todo,
+            enableTasksPluginSupport = enableTasksPluginSupport,
+            useEmojisInUi = useEmojisInUi,
+            onToggle = onToggle,
+            onEdit = onEdit,
+            onAddSubtask = onAddSubtask,
+            showSubtaskButton = showSubtaskButton,
+            dragHandleModifier = dragHandleModifier,
+            compact = compact,
+            isGhost = isGhost,
+            allDescendantsDone = allDescendantsDone,
+            rowCorner = rowCorner,
+        )
     }
-    val chipIconSize = if (compact) 14.dp else 18.dp
-    val actionSize = if (compact) 32.dp else 40.dp
-    // confirmValueChange is captured once by rememberSwipeToDismissBoxState; keep
-    // callbacks/todo current so swipe-delete/move cannot target a stale lineIndex.
+
+    // Ghosts are structural only: no swipe chrome (avoids delete-icon bleed through fade).
+    if (isGhost) {
+        Box(
+            modifier = modifier
+                .padding(start = indentPadding)
+                .graphicsLayer { alpha = GhostRowAlpha },
+            content = { body() },
+        )
+        return
+    }
+
     val currentOnRequestDelete by rememberUpdatedState(onRequestDelete)
     val currentOnRequestMove by rememberUpdatedState(onRequestMove)
     val currentTodo by rememberUpdatedState(todo)
@@ -141,7 +169,7 @@ fun TodoRow(
             val icon = when (dismissState.targetValue) {
                 SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
                 SwipeToDismissBoxValue.StartToEnd -> Icons.AutoMirrored.Outlined.ArrowForward
-                else -> Icons.Filled.Delete
+                else -> null
             }
             val contentColor = when (dismissState.targetValue) {
                 SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.onErrorContainer
@@ -163,163 +191,198 @@ fun TodoRow(
                     .padding(horizontal = if (compact) 12.dp else 16.dp),
                 contentAlignment = alignment,
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
-                        stringResource(R.string.category_move_title)
-                    } else {
-                        stringResource(R.string.cd_delete)
-                    },
-                    tint = contentColor,
-                )
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
+                            stringResource(R.string.category_move_title)
+                        } else {
+                            stringResource(R.string.cd_delete)
+                        },
+                        tint = contentColor,
+                    )
+                }
             }
         },
-        content = {
-            val rowShape = RoundedCornerShape(rowCorner)
+        content = { body() },
+    )
+}
+
+@Composable
+private fun TodoRowBody(
+    todo: Todo,
+    enableTasksPluginSupport: Boolean,
+    useEmojisInUi: Boolean,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onAddSubtask: () -> Unit,
+    showSubtaskButton: Boolean,
+    dragHandleModifier: Modifier?,
+    compact: Boolean,
+    isGhost: Boolean,
+    allDescendantsDone: Boolean,
+    rowCorner: Dp,
+) {
+    val rowHorizontalPadding = if (compact) 8.dp else 12.dp
+    val rowVerticalPadding = if (compact) 2.dp else 10.dp
+    val rowSpacing = if (compact) 6.dp else 12.dp
+    val textStyle = if (compact) {
+        MaterialTheme.typography.bodyMedium
+    } else {
+        MaterialTheme.typography.bodyLarge
+    }
+    val chipIconSize = if (compact) 14.dp else 18.dp
+    val actionSize = if (compact) 32.dp else 40.dp
+    val rowShape = RoundedCornerShape(rowCorner)
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = rowShape,
+            )
+            .clip(rowShape)
+            .clickable(onClick = onEdit)
+            .padding(horizontal = rowHorizontalPadding, vertical = rowVerticalPadding),
+    ) {
+        if (isGhost) {
+            TriStateCheckbox(
+                state = if (allDescendantsDone) ToggleableState.On else ToggleableState.Indeterminate,
+                onClick = onToggle,
+            )
+        } else {
+            Checkbox(
+                checked = todo.isDone,
+                onCheckedChange = { onToggle() },
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            val targetColor = if (todo.isDone || isGhost) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            }
+            val textColor by animateColorAsState(
+                targetValue = targetColor,
+                animationSpec = tween(300),
+                label = "todo-text-color",
+            )
+            val priorityColor = priorityColorFor(todo.priority)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(rowSpacing),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = rowShape,
-                    )
-                    .clip(rowShape)
-                    .clickable(onClick = onEdit)
-                    .padding(horizontal = rowHorizontalPadding, vertical = rowVerticalPadding),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
             ) {
-                Checkbox(
-                    checked = todo.isDone,
-                    onCheckedChange = { onToggle() },
-                )
-                Column(
-                    modifier = Modifier.weight(1f),
-                ) {
-                    val targetColor = if (todo.isDone) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                    val textColor by animateColorAsState(
-                        targetValue = targetColor,
-                        animationSpec = tween(300),
-                        label = "todo-text-color",
+                if (priorityColor != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (compact) 6.dp else 8.dp)
+                            .background(color = priorityColor, shape = CircleShape),
                     )
-                    val priorityColor = priorityColorFor(todo.priority)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
-                    ) {
-                        if (priorityColor != null) {
-                            Box(
-                                modifier = Modifier
-                                    .size(if (compact) 6.dp else 8.dp)
-                                    .background(color = priorityColor, shape = CircleShape),
-                            )
-                        }
-                        Text(
-                            text = todo.text,
-                            style = textStyle,
-                            textDecoration = if (todo.isDone) TextDecoration.LineThrough else TextDecoration.None,
-                            color = textColor,
-                            maxLines = if (compact) 2 else Int.MAX_VALUE,
-                            overflow = if (compact) TextOverflow.Ellipsis else TextOverflow.Clip,
-                        )
-                    }
+                }
+                Text(
+                    text = todo.text,
+                    style = textStyle,
+                    textDecoration = if (todo.isDone) TextDecoration.LineThrough else TextDecoration.None,
+                    color = textColor,
+                    maxLines = if (compact) 2 else Int.MAX_VALUE,
+                    overflow = if (compact) TextOverflow.Ellipsis else TextOverflow.Clip,
+                )
+            }
 
-                    if (enableTasksPluginSupport) {
-                        val chips = buildTasksMetaChips(todo = todo, useEmojisInUi = useEmojisInUi)
-                        if (chips.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                            ) {
-                                chips.forEach { chip ->
-                                    val chipColors = chip.color?.let { color ->
-                                        AssistChipDefaults.assistChipColors(
-                                            containerColor = color,
-                                            labelColor = MaterialTheme.colorScheme.onSurface,
-                                            leadingIconContentColor = MaterialTheme.colorScheme.onSurface,
+            // Ghosts are structural context; skip meta chips to keep them quiet.
+            if (enableTasksPluginSupport && !isGhost) {
+                val chips = buildTasksMetaChips(todo = todo, useEmojisInUi = useEmojisInUi)
+                if (chips.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                    ) {
+                        chips.forEach { chip ->
+                            val chipColors = chip.color?.let { color ->
+                                AssistChipDefaults.assistChipColors(
+                                    containerColor = color,
+                                    labelColor = MaterialTheme.colorScheme.onSurface,
+                                    leadingIconContentColor = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            androidx.compose.material3.AssistChip(
+                                onClick = {},
+                                enabled = false,
+                                colors = chipColors ?: AssistChipDefaults.assistChipColors(),
+                                leadingIcon = chip.icon?.let { icon ->
+                                    {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(chipIconSize),
                                         )
                                     }
-                                    androidx.compose.material3.AssistChip(
-                                        onClick = {},
-                                        enabled = false,
-                                        colors = chipColors ?: AssistChipDefaults.assistChipColors(),
-                                        leadingIcon = chip.icon?.let { icon ->
-                                            {
-                                                Icon(
-                                                    imageVector = icon,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(chipIconSize),
-                                                )
-                                            }
+                                },
+                                label = {
+                                    Text(
+                                        text = chip.label,
+                                        style = if (compact) {
+                                            MaterialTheme.typography.labelSmall
+                                        } else {
+                                            MaterialTheme.typography.labelMedium
                                         },
-                                        label = {
-                                            Text(
-                                                text = chip.label,
-                                                style = if (compact) {
-                                                    MaterialTheme.typography.labelSmall
-                                                } else {
-                                                    MaterialTheme.typography.labelMedium
-                                                },
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                }
-                            }
-                        }
-                    }
-                }
-                if (showSubtaskButton && todo.indentLevel < 2) {
-                    IconButton(
-                        onClick = onAddSubtask,
-                        modifier = Modifier.size(actionSize),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.SubdirectoryArrowRight,
-                            contentDescription = stringResource(R.string.cd_add_subtask),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (dragHandleModifier != null) {
-                    // Non-clickable: IconButton's clickable fights drag and steals scroll.
-                    val baseViewConfiguration = LocalViewConfiguration.current
-                    val shortPressViewConfiguration = remember(baseViewConfiguration) {
-                        object : ViewConfiguration {
-                            override val longPressTimeoutMillis = DragHandlePressTimeoutMs
-                            override val doubleTapTimeoutMillis =
-                                baseViewConfiguration.doubleTapTimeoutMillis
-                            override val doubleTapMinTimeMillis =
-                                baseViewConfiguration.doubleTapMinTimeMillis
-                            override val touchSlop = baseViewConfiguration.touchSlop
-                        }
-                    }
-                    CompositionLocalProvider(
-                        LocalViewConfiguration provides shortPressViewConfiguration,
-                    ) {
-                        Box(
-                            modifier = dragHandleModifier.size(actionSize),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.DragHandle,
-                                contentDescription = stringResource(R.string.cd_reorder_todo),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                },
                             )
                         }
                     }
                 }
             }
-        },
-    )
+        }
+        if (showSubtaskButton && todo.indentLevel < 2) {
+            IconButton(
+                onClick = onAddSubtask,
+                modifier = Modifier.size(actionSize),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.SubdirectoryArrowRight,
+                    contentDescription = stringResource(R.string.cd_add_subtask),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (dragHandleModifier != null) {
+            // Non-clickable: IconButton's clickable fights drag and steals scroll.
+            val baseViewConfiguration = LocalViewConfiguration.current
+            val shortPressViewConfiguration = remember(baseViewConfiguration) {
+                object : ViewConfiguration {
+                    override val longPressTimeoutMillis = DragHandlePressTimeoutMs
+                    override val doubleTapTimeoutMillis =
+                        baseViewConfiguration.doubleTapTimeoutMillis
+                    override val doubleTapMinTimeMillis =
+                        baseViewConfiguration.doubleTapMinTimeMillis
+                    override val touchSlop = baseViewConfiguration.touchSlop
+                }
+            }
+            CompositionLocalProvider(
+                LocalViewConfiguration provides shortPressViewConfiguration,
+            ) {
+                Box(
+                    modifier = dragHandleModifier.size(actionSize),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.DragHandle,
+                        contentDescription = stringResource(R.string.cd_reorder_todo),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -171,6 +171,67 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun tryUncompleteTodoTree_clears_root_and_all_descendants() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "  - [x] Child",
+            "    - [x] Grandchild",
+            "  - [x] Other child",
+            "- [x] Sibling",
+        )
+
+        val cleared = MarkdownParser.tryUncompleteTodoTree(
+            lines = lines,
+            lineIndex = 0,
+            enableTasksPlugin = false,
+        )
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent",
+                "  - [ ] Child",
+                "    - [ ] Grandchild",
+                "  - [ ] Other child",
+                "- [x] Sibling",
+            ),
+            cleared,
+        )
+    }
+
+    @Test
+    fun tryUncompleteTodoTree_with_tasks_plugin_removes_done_dates_on_descendants() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "  - [x] Child ✅ 2024-01-01",
+            "    - [x] Nested ✅ 2024-01-02",
+        )
+
+        val cleared = MarkdownParser.tryUncompleteTodoTree(
+            lines = lines,
+            lineIndex = 0,
+            enableTasksPlugin = true,
+        )
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent",
+                "  - [ ] Child",
+                "    - [ ] Nested",
+            ),
+            cleared,
+        )
+    }
+
+    @Test
+    fun tryUncompleteTodoTree_returns_null_for_non_todo() {
+        val lines = listOf("# Heading", "- [x] Task")
+        assertEquals(
+            null,
+            MarkdownParser.tryUncompleteTodoTree(lines, lineIndex = 0, enableTasksPlugin = false),
+        )
+    }
+
+    @Test
     fun toggleLine_cascade_preserves_notes_and_skips_already_matching() {
         val lines = listOf(
             "- [ ] Parent",

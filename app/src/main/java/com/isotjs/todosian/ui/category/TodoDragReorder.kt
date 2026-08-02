@@ -14,7 +14,6 @@ internal data class ReorderTodoItem(
 internal enum class DragSection {
     All,
     Active,
-    Completed,
 }
 
 /** Visible LazyColumn bounds for one section item, in viewport coordinates. */
@@ -41,7 +40,11 @@ internal sealed interface TodoDragCommit {
     ) : TodoDragCommit
 }
 
-internal fun toReorderItems(todos: List<Todo>, lines: List<String>): List<ReorderTodoItem> {
+internal fun toReorderItems(
+    todos: List<Todo>,
+    lines: List<String>,
+    keyPrefix: String = "",
+): List<ReorderTodoItem> {
     if (todos.isEmpty()) return emptyList()
     val ordered = todos.sortedBy { it.lineIndex }
     val keyOccurrence = HashMap<String, Int>()
@@ -50,7 +53,12 @@ internal fun toReorderItems(todos: List<Todo>, lines: List<String>): List<Reorde
             ?: "${todo.text}:${todo.isDone}:${todo.indentLevel}"
         val occurrence = keyOccurrence[baseKey] ?: 0
         keyOccurrence[baseKey] = occurrence + 1
-        ReorderTodoItem(todo = todo, stableKey = "$baseKey::$occurrence")
+        val prefixed = if (keyPrefix.isEmpty()) {
+            "$baseKey::$occurrence"
+        } else {
+            "$keyPrefix::$baseKey::$occurrence"
+        }
+        ReorderTodoItem(todo = todo, stableKey = prefixed)
     }
 }
 

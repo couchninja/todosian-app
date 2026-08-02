@@ -98,6 +98,7 @@ import com.isotjs.todosian.ui.components.TodoRow
 import com.isotjs.todosian.ui.components.TodoSheetMode
 import com.isotjs.todosian.ui.components.TodosianDimens
 import com.isotjs.todosian.ui.components.TodosianSectionHeader
+import com.isotjs.todosian.utils.CompletedSectionBuilder
 import com.isotjs.todosian.utils.MarkdownParser
 import com.isotjs.todosian.utils.TodoSorter
 import kotlinx.coroutines.delay
@@ -565,8 +566,15 @@ fun CategoryScreen(
         val sortedActiveTodos = remember(uiState.activeTodos, settings.todoSort) {
             TodoSorter.sort(uiState.activeTodos, settings.todoSort)
         }
-        val sortedCompletedTodos = remember(uiState.completedTodos, settings.todoSort) {
-            TodoSorter.sort(uiState.completedTodos, settings.todoSort)
+        val completedSectionItems = remember(
+            uiState.activeTodos,
+            uiState.completedTodos,
+            settings.todoSort,
+        ) {
+            CompletedSectionBuilder.build(
+                allTodos = uiState.activeTodos + uiState.completedTodos,
+                sort = settings.todoSort,
+            )
         }
         val sortedAllTodos = remember(uiState.activeTodos, uiState.completedTodos, settings.todoSort) {
             TodoSorter.sort(uiState.activeTodos + uiState.completedTodos, settings.todoSort)
@@ -578,7 +586,6 @@ fun CategoryScreen(
 
         val allItemsState = remember { mutableStateOf<List<ReorderTodoItem>?>(null) }
         val activeItemsState = remember { mutableStateOf<List<ReorderTodoItem>?>(null) }
-        val completedItemsState = remember { mutableStateOf<List<ReorderTodoItem>?>(null) }
         val dragSectionState = remember { mutableStateOf<DragSection?>(null) }
         val draggedKeyState = remember { mutableStateOf<String?>(null) }
         val draggedLevelState = remember { mutableIntStateOf(0) }
@@ -591,27 +598,23 @@ fun CategoryScreen(
             when (section) {
                 DragSection.All -> allItemsState.value = items
                 DragSection.Active -> activeItemsState.value = items
-                DragSection.Completed -> completedItemsState.value = items
             }
         }
 
         fun fallbackItems(section: DragSection): List<ReorderTodoItem> = when (section) {
-            DragSection.All -> toReorderItems(sortedAllTodos, uiState.lines)
-            DragSection.Active -> toReorderItems(sortedActiveTodos, uiState.lines)
-            DragSection.Completed -> toReorderItems(sortedCompletedTodos, uiState.lines)
+            DragSection.All -> toReorderItems(sortedAllTodos, uiState.lines, keyPrefix = "all")
+            DragSection.Active -> toReorderItems(sortedActiveTodos, uiState.lines, keyPrefix = "active")
         }
 
         fun sectionItems(section: DragSection): List<ReorderTodoItem> =
             when (section) {
                 DragSection.All -> allItemsState.value
                 DragSection.Active -> activeItemsState.value
-                DragSection.Completed -> completedItemsState.value
             } ?: fallbackItems(section)
 
         LaunchedEffect(
             sortedAllTodos,
             sortedActiveTodos,
-            sortedCompletedTodos,
             uiState.lines,
             canReorder,
         ) {
@@ -619,20 +622,20 @@ fun CategoryScreen(
             if (!canReorder) {
                 allItemsState.value = emptyList()
                 activeItemsState.value = emptyList()
-                completedItemsState.value = emptyList()
                 return@LaunchedEffect
             }
-            allItemsState.value = toReorderItems(sortedAllTodos, uiState.lines)
-            activeItemsState.value = toReorderItems(sortedActiveTodos, uiState.lines)
-            completedItemsState.value = toReorderItems(sortedCompletedTodos, uiState.lines)
+            allItemsState.value = toReorderItems(sortedAllTodos, uiState.lines, keyPrefix = "all")
+            activeItemsState.value = toReorderItems(
+                sortedActiveTodos,
+                uiState.lines,
+                keyPrefix = "active",
+            )
         }
 
         val allItems = allItemsState.value
-            ?: if (canReorder) toReorderItems(sortedAllTodos, uiState.lines) else emptyList()
+            ?: if (canReorder) fallbackItems(DragSection.All) else emptyList()
         val activeItems = activeItemsState.value
-            ?: if (canReorder) toReorderItems(sortedActiveTodos, uiState.lines) else emptyList()
-        val completedItems = completedItemsState.value
-            ?: if (canReorder) toReorderItems(sortedCompletedTodos, uiState.lines) else emptyList()
+            ?: if (canReorder) fallbackItems(DragSection.Active) else emptyList()
 
         fun clearDragState() {
             dragSectionState.value = null
@@ -721,6 +724,7 @@ fun CategoryScreen(
 
         val onDragStartedForSection: (DragSection, ReorderTodoItem) -> Unit =
             fun(section: DragSection, item: ReorderTodoItem) {
+                if (item.todo.isDone) return
                 if (draggedKeyState.value != null) return
                 dragSectionState.value = section
                 draggedKeyState.value = item.stableKey
@@ -785,6 +789,9 @@ fun CategoryScreen(
             useEmojisInUi = settings.tasksPluginUseEmojisInUi,
             compact = settings.compactTodoList,
             onToggle = { todo -> viewModel.toggleTodo(todo, settings.enableTasksPluginSupport) },
+            onUncompleteTree = { todo ->
+                viewModel.uncompleteTodoTree(todo, settings.enableTasksPluginSupport)
+            },
             onEdit = { todo ->
                 sheetMode = TodoSheetMode.Edit(todo)
                 sheetText = todo.text
@@ -846,9 +853,10 @@ fun CategoryScreen(
                         onDragStopped = { onDragStoppedForSection(DragSection.All) },
                     )
                 } else {
-                    flatTodoItems(
+                    flatTodos(
                         todos = sortedAllTodos,
                         actions = todoActions,
+                        keyPrefix = "all",
                     )
                 }
                 item { Spacer(modifier = Modifier.height(96.dp)) }
@@ -877,46 +885,25 @@ fun CategoryScreen(
                         onDragStopped = { onDragStoppedForSection(DragSection.Active) },
                     )
                 }
-                if (completedItems.isNotEmpty()) {
-                    item(key = "header-completed") {
-                        TodosianSectionHeader(text = stringResource(R.string.category_completed))
-                    }
-                    draggableTodoItems(
-                        items = completedItems,
-                        actions = todoActions,
-                        draggedKey = draggedKey,
-                        dragOffsetY = dragOffsetY,
-                        dropInsertBefore = if (dragSection == DragSection.Completed) {
-                            dropInsertBefore
-                        } else {
-                            null
-                        },
-                        draggedIndentLevel = draggedLevel,
-                        dragSession = dragSession,
-                        onDragStarted = { item ->
-                            onDragStartedForSection(DragSection.Completed, item)
-                        },
-                        onDragDelta = { delta ->
-                            onDragDeltaForSection(DragSection.Completed, delta)
-                        },
-                        onDragStopped = { onDragStoppedForSection(DragSection.Completed) },
-                    )
+            } else if (sortedActiveTodos.isNotEmpty()) {
+                item { TodosianSectionHeader(text = stringResource(R.string.category_active)) }
+                flatTodos(
+                    todos = sortedActiveTodos,
+                    actions = todoActions,
+                    keyPrefix = "active",
+                )
+            }
+
+            if (completedSectionItems.isNotEmpty()) {
+                item(key = "header-completed") {
+                    TodosianSectionHeader(text = stringResource(R.string.category_completed))
                 }
-            } else {
-                if (sortedActiveTodos.isNotEmpty()) {
-                    item { TodosianSectionHeader(text = stringResource(R.string.category_active)) }
-                    flatTodoItems(
-                        todos = sortedActiveTodos,
-                        actions = todoActions,
-                    )
-                }
-                if (sortedCompletedTodos.isNotEmpty()) {
-                    item { TodosianSectionHeader(text = stringResource(R.string.category_completed)) }
-                    flatTodoItems(
-                        todos = sortedCompletedTodos,
-                        actions = todoActions,
-                    )
-                }
+                flatSectionItems(
+                    items = completedSectionItems,
+                    actions = todoActions,
+                    keyPrefix = "completed",
+                    showSubtaskButton = false,
+                )
             }
 
             item { Spacer(modifier = Modifier.height(96.dp)) }
@@ -929,25 +916,45 @@ private data class TodoListActions(
     val useEmojisInUi: Boolean,
     val compact: Boolean,
     val onToggle: (Todo) -> Unit,
+    val onUncompleteTree: (Todo) -> Unit,
     val onEdit: (Todo) -> Unit,
     val onAddSubtask: (Todo) -> Unit,
     val onRequestDelete: (Todo) -> Unit,
     val onRequestMove: (Todo) -> Unit,
 )
 
-private fun LazyListScope.flatTodoItems(
+private fun LazyListScope.flatTodos(
     todos: List<Todo>,
     actions: TodoListActions,
+    keyPrefix: String,
+    showSubtaskButton: Boolean = true,
+) {
+    flatSectionItems(
+        items = todos.map { CompletedSectionBuilder.Item(todo = it, isGhost = false) },
+        actions = actions,
+        keyPrefix = keyPrefix,
+        showSubtaskButton = showSubtaskButton,
+    )
+}
+
+private fun LazyListScope.flatSectionItems(
+    items: List<CompletedSectionBuilder.Item>,
+    actions: TodoListActions,
+    keyPrefix: String,
+    showSubtaskButton: Boolean = true,
 ) {
     val itemSpacing = if (actions.compact) 2.dp else 8.dp
     items(
-        items = todos,
-        key = { it.id },
-    ) { todo ->
+        items = items,
+        key = { "$keyPrefix-${it.todo.id}" },
+    ) { item ->
         CategoryTodoRow(
-            todo = todo,
+            todo = item.todo,
             actions = actions,
             dragHandleModifier = null,
+            showSubtaskButton = showSubtaskButton,
+            isGhost = item.isGhost,
+            allDescendantsDone = item.allDescendantsDone,
             modifier = Modifier.animateItem(
                 fadeInSpec = tween(durationMillis = 180),
                 placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -969,6 +976,7 @@ private fun LazyListScope.draggableTodoItems(
     onDragStarted: (ReorderTodoItem) -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragStopped: () -> Unit,
+    showSubtaskButton: Boolean = true,
 ) {
     val draggedBlockRange = if (draggedKey != null) {
         val start = items.indexOfFirst { it.stableKey == draggedKey }
@@ -1030,18 +1038,23 @@ private fun LazyListScope.draggableTodoItems(
                 CategoryTodoRow(
                     todo = item.todo,
                     actions = actions,
-                    // Long-press then drag so a normal swipe on the handle still scrolls.
-                    dragHandleModifier = Modifier.pointerInput(item.stableKey, dragSession) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { currentOnDragStarted(item) },
-                            onDragEnd = { currentOnDragStopped() },
-                            onDragCancel = { currentOnDragStopped() },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                currentOnDragDelta(dragAmount.y)
-                            },
-                        )
+                    // Completed todos are not reorderable; active items get a long-press handle.
+                    dragHandleModifier = if (item.todo.isDone) {
+                        null
+                    } else {
+                        Modifier.pointerInput(item.stableKey, dragSession) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { currentOnDragStarted(item) },
+                                onDragEnd = { currentOnDragStopped() },
+                                onDragCancel = { currentOnDragStopped() },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    currentOnDragDelta(dragAmount.y)
+                                },
+                            )
+                        }
                     },
+                    showSubtaskButton = showSubtaskButton,
                 )
                 Spacer(modifier = Modifier.height(if (actions.compact) 2.dp else 8.dp))
             }
@@ -1083,16 +1096,28 @@ private fun CategoryTodoRow(
     actions: TodoListActions,
     dragHandleModifier: Modifier?,
     modifier: Modifier = Modifier,
+    showSubtaskButton: Boolean = true,
+    isGhost: Boolean = false,
+    allDescendantsDone: Boolean = false,
 ) {
     TodoRow(
         todo = todo,
         enableTasksPluginSupport = actions.enableTasksPluginSupport,
         useEmojisInUi = actions.useEmojisInUi,
-        onToggle = { actions.onToggle(todo) },
+        onToggle = {
+            if (isGhost) {
+                actions.onUncompleteTree(todo)
+            } else {
+                actions.onToggle(todo)
+            }
+        },
         onEdit = { actions.onEdit(todo) },
         onAddSubtask = { actions.onAddSubtask(todo) },
         onRequestDelete = { actions.onRequestDelete(todo) },
-        onRequestMove = { actions.onRequestMove(todo) },
+        onRequestMove = if (isGhost) null else { { actions.onRequestMove(todo) } },
+        showSubtaskButton = showSubtaskButton,
+        isGhost = isGhost,
+        allDescendantsDone = allDescendantsDone,
         // Keep swipe enabled with the reorder handle: horizontal dismiss vs long-press vertical drag.
         dragHandleModifier = dragHandleModifier,
         compact = actions.compact,

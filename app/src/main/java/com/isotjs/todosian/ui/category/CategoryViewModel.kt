@@ -119,18 +119,44 @@ class CategoryViewModel(
     }
 
     fun toggleTodo(todo: Todo, enableTasksPluginSupport: Boolean) {
+        applyLineMutation(
+            mutate = { lines ->
+                MarkdownParser.tryToggleLine(
+                    lines = lines,
+                    lineIndex = todo.lineIndex,
+                    enableTasksPlugin = enableTasksPluginSupport,
+                )
+            },
+        )
+    }
+
+    /** Clears done state for [todo] and every nested subtask (ghost partial-check action). */
+    fun uncompleteTodoTree(todo: Todo, enableTasksPluginSupport: Boolean) {
+        applyLineMutation(
+            mutate = { lines ->
+                MarkdownParser.tryUncompleteTodoTree(
+                    lines = lines,
+                    lineIndex = todo.lineIndex,
+                    enableTasksPlugin = enableTasksPluginSupport,
+                )
+            },
+        )
+    }
+
+    /**
+     * Applies a line mutation that fails closed with a read-error toast + refresh.
+     * No-ops when [mutate] returns the same list instance/content as before.
+     */
+    private fun applyLineMutation(mutate: (List<String>) -> List<String>?) {
         viewModelScope.launch {
             val previousLines = _uiState.value.lines
-            val newLines = MarkdownParser.tryToggleLine(
-                lines = previousLines,
-                lineIndex = todo.lineIndex,
-                enableTasksPlugin = enableTasksPluginSupport,
-            )
+            val newLines = mutate(previousLines)
             if (newLines == null) {
                 _events.emit(Event.ShowMessage(R.string.error_read_failed))
                 refreshFromDisk(showLoading = false)
                 return@launch
             }
+            if (newLines == previousLines) return@launch
 
             applyLines(newLines)
 

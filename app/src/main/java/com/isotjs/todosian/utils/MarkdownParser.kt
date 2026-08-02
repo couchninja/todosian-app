@@ -116,6 +116,35 @@ object MarkdownParser {
         return toggleLine(lines, lineIndex, enableTasksPlugin, today)
     }
 
+    /**
+     * Marks the todo at [lineIndex] and every nested subtask incomplete.
+     * Used by ghost ancestors in the Completed section (partial-check tap).
+     */
+    fun tryUncompleteTodoTree(
+        lines: List<String>,
+        lineIndex: Int,
+        enableTasksPlugin: Boolean,
+        today: LocalDate = LocalDate.now(),
+    ): List<String>? {
+        if (lineIndex !in lines.indices) return null
+        if (!isTodoLine(lines[lineIndex])) return null
+
+        val clearedRoot = setLineDone(
+            lines = lines,
+            lineIndex = lineIndex,
+            done = false,
+            enableTasksPlugin = enableTasksPlugin,
+            today = today,
+        )
+        return cascadeDoneToDescendants(
+            lines = clearedRoot,
+            rootIndex = lineIndex,
+            done = false,
+            enableTasksPlugin = enableTasksPlugin,
+            today = today,
+        )
+    }
+
     fun addTodo(
         lines: List<String>,
         text: String,
