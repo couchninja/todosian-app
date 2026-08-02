@@ -42,9 +42,6 @@ class HomeViewModel(
     private val _events = MutableSharedFlow<Event>()
     val events = _events.asSharedFlow()
 
-    private val _dirtyVersion = MutableStateFlow(0L)
-    val dirtyVersion: StateFlow<Long> = _dirtyVersion.asStateFlow()
-
     private var observeJob: Job? = null
     private var observedFolderUri: Uri? = null
 
@@ -63,18 +60,17 @@ class HomeViewModel(
             fileRepository.observeMarkdownFilesChanges(folderUri)
                 .debounce(350)
                 .catch {
-                    // Thanks god app still works without live updates.
+                    // Best-effort live updates; resume refresh still covers missed events.
                 }
                 .collectLatest {
-                    _dirtyVersion.value = System.currentTimeMillis()
+                    // Reload immediately so external editors/sync are visible while Home is open.
+                    refresh(showLoading = false)
                 }
         }
     }
 
-    fun refreshIfDirty() {
-        val version = _dirtyVersion.value
-        if (version <= 0L) return
-        _dirtyVersion.value = 0L
+    /** Reload from disk when the screen becomes visible (covers observers that missed edits). */
+    fun refreshOnStart() {
         refresh(showLoading = false)
     }
 

@@ -7,6 +7,7 @@ import com.isotjs.todosian.data.SafFileRepository
 import com.isotjs.todosian.data.settings.AppSettingsRepository
 import com.isotjs.todosian.data.settings.SharedPrefsAppSettingsRepository
 import com.isotjs.todosian.notifications.DueReminderScheduler
+import com.isotjs.todosian.widget.CategoriesWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,22 @@ class TodosianApplication : Application() {
                     DueReminderScheduler.sync(applicationContext, enabled)
                 }
         }
+
+        appScope.launch {
+            appSettingsRepository.settings
+                .map { it.todoSort }
+                .distinctUntilChanged()
+                .collect {
+                    CategoriesWidgetUpdater.requestUpdate(applicationContext)
+                }
+        }
+
+        // Resume vault watching after process death if a widget is already on the home screen.
+        CategoriesWidgetUpdater.startObservingIfWidgetsExist(
+            applicationContext,
+            fileRepository,
+            preferencesManager,
+        )
     }
 
     override fun onTerminate() {

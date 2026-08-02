@@ -10,6 +10,7 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.isotjs.todosian.data.model.Category
 import com.isotjs.todosian.utils.MarkdownParser
+import com.isotjs.todosian.widget.CategoriesWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,9 @@ interface FileRepository {
 
     suspend fun readLines(uri: Uri): Result<List<String>>
 
+    /** Document last-modified time in epoch millis, or 0 if the provider does not report one. */
+    suspend fun getLastModified(uri: Uri): Result<Long>
+
     suspend fun getDisplayName(uri: Uri): Result<String>
 
     suspend fun getFolderDisplayName(folderUri: Uri): Result<String>
@@ -54,10 +58,6 @@ interface FileRepository {
 
     suspend fun countMarkdownFiles(folderUri: Uri): Result<Int>
 
-    fun observeTreeChanges(treeUri: Uri): Flow<Unit>
-
-    fun observeDocumentChanges(documentUri: Uri): Flow<Unit>
-
     fun observeMarkdownFilesChanges(folderUri: Uri): Flow<Unit>
 }
 
@@ -70,6 +70,7 @@ class SafFileRepository(
 
     override fun clearFolderUri() {
         preferencesManager.clearFolderUri()
+        CategoriesWidgetUpdater.requestUpdate(appContext)
     }
 
     override suspend fun persistFolderUri(uri: Uri): Result<Unit> {
@@ -79,6 +80,8 @@ class SafFileRepository(
                 appContext.contentResolver.takePersistableUriPermission(uri, flags)
                 preferencesManager.saveFolderUri(uri)
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -130,6 +133,12 @@ class SafFileRepository(
         }
     }
 
+    override suspend fun getLastModified(uri: Uri): Result<Long> {
+        return withContext(Dispatchers.IO) {
+            runCatching { lastModifiedInternal(uri) }
+        }
+    }
+
     override suspend fun getDisplayName(uri: Uri): Result<String> {
         return withContext(Dispatchers.IO) {
             runCatching {
@@ -157,6 +166,8 @@ class SafFileRepository(
             runCatching {
                 writeLinesInternal(uri, lines)
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -175,6 +186,8 @@ class SafFileRepository(
 
                 created.uri
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -195,6 +208,8 @@ class SafFileRepository(
                 val renamed = DocumentsContract.renameDocument(appContext.contentResolver, categoryUri, fileName)
                 if (renamed == null) throw IllegalStateException("Unable to rename document")
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -206,6 +221,8 @@ class SafFileRepository(
                 val ok = file.delete()
                 if (!ok) throw IllegalStateException("Unable to delete file")
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -223,6 +240,8 @@ class SafFileRepository(
                 writeLinesInternal(sourceUri, updated.first)
                 writeLinesInternal(targetUri, updated.second)
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -239,6 +258,8 @@ class SafFileRepository(
 
                 writeLinesInternal(targetUri, updated.second)
             }
+        }.onSuccess {
+            CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
 
@@ -261,22 +282,6 @@ class SafFileRepository(
                 }
             }
         }
-    }
-
-    override fun observeTreeChanges(treeUri: Uri): Flow<Unit> {
-        val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId)
-        return observeUrisChanges(
-            uris = listOf(treeUri, childrenUri),
-            notifyDescendants = true,
-        )
-    }
-
-    override fun observeDocumentChanges(documentUri: Uri): Flow<Unit> {
-        return observeUrisChanges(
-            uris = listOf(documentUri),
-            notifyDescendants = false,
-        )
     }
 
     override fun observeMarkdownFilesChanges(folderUri: Uri): Flow<Unit> {
@@ -370,42 +375,28 @@ class SafFileRepository(
         }.conflate()
     }
 
-    private fun observeUrisChanges(
-        uris: List<Uri>,
-        notifyDescendants: Boolean,
-    ): Flow<Unit> {
-        return callbackFlow {
-            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) {
-                    trySend(Unit)
-                }
-
-                override fun onChange(selfChange: Boolean, changedUri: Uri?) {
-                    trySend(Unit)
-                }
-            }
-
-            val resolver = appContext.contentResolver
-            runCatching {
-                uris.forEach { uri ->
-                    resolver.registerContentObserver(uri, notifyDescendants, observer)
-                }
-            }.onFailure { t ->
-                close(t)
-                return@callbackFlow
-            }
-
-            awaitClose {
-                runCatching { resolver.unregisterContentObserver(observer) }
-            }
-        }.conflate()
-    }
-
     private fun readLinesInternal(uri: Uri): List<String> {
         appContext.contentResolver.openInputStream(uri)?.use { input ->
             return input.bufferedReader().readLines()
         }
         throw IllegalStateException("Unable to open input stream")
+    }
+
+    private fun lastModifiedInternal(uri: Uri): Long {
+        val fromQuery = appContext.contentResolver.query(
+            uri,
+            arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
+        if (fromQuery != null) return fromQuery
+
+        val file = DocumentFile.fromSingleUri(appContext, uri)
+            ?: throw IllegalStateException("Invalid file URI")
+        return file.lastModified()
     }
 
     private fun writeLinesInternal(uri: Uri, lines: List<String>) {

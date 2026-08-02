@@ -50,32 +50,39 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.isotjs.todosian.R
 import com.isotjs.todosian.data.FileRepository
 import com.isotjs.todosian.data.model.Todo
-import com.isotjs.todosian.data.model.priorityRank
 import com.isotjs.todosian.data.settings.AppSettingsRepository
 import com.isotjs.todosian.data.settings.NewTodoFilePosition
 import com.isotjs.todosian.data.settings.TodoGrouping
-import com.isotjs.todosian.data.settings.TodoSort
 import com.isotjs.todosian.ui.components.TasksMetaEditor
 import com.isotjs.todosian.ui.components.TodoRow
 import com.isotjs.todosian.ui.components.TodoSheetMode
 import com.isotjs.todosian.ui.components.TodosianDimens
 import com.isotjs.todosian.ui.components.TodosianSectionHeader
 import com.isotjs.todosian.utils.MarkdownParser
+import com.isotjs.todosian.utils.TodoSorter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.WindowInsets
@@ -89,6 +96,10 @@ fun CategoryScreen(
     appSettingsRepository: AppSettingsRepository,
     categoryUri: Uri,
     onBack: () -> Unit,
+    openAddTodo: Boolean = false,
+    addRequestId: Long = 0L,
+    openEditLineIndex: Int = -1,
+    editRequestId: Long = 0L,
     modifier: Modifier = Modifier,
 ) {
     val viewModel: CategoryViewModel = viewModel(
@@ -102,6 +113,13 @@ fun CategoryScreen(
     val settings by appSettingsRepository.settings.collectAsStateWithLifecycle(
         initialValue = com.isotjs.todosian.data.settings.AppSettings(),
     )
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, viewModel) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.refreshFromDisk(showLoading = false)
+        }
+    }
 
     val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -127,6 +145,55 @@ fun CategoryScreen(
     var deleteTodoHasSubtasks by remember { mutableStateOf(false) }
     var moveTodoTarget by remember { mutableStateOf<Todo?>(null) }
     var showCopyOption by remember { mutableStateOf(false) }
+    var addTodoRequestHandled by rememberSaveable(categoryUri, addRequestId) { mutableStateOf(false) }
+    var editTodoRequestHandled by rememberSaveable(categoryUri, editRequestId) { mutableStateOf(false) }
+
+    LaunchedEffect(openAddTodo, categoryUri, addRequestId) {
+        if (!openAddTodo) {
+            addTodoRequestHandled = false
+            return@LaunchedEffect
+        }
+        if (addTodoRequestHandled) return@LaunchedEffect
+        addTodoRequestHandled = true
+        sheetMode = TodoSheetMode.Add
+        sheetText = ""
+        sheetMeta = MarkdownParser.TasksMeta()
+        sheetParentTodo = null
+    }
+
+    LaunchedEffect(
+        openEditLineIndex,
+        categoryUri,
+        editRequestId,
+        uiState.isLoading,
+        uiState.activeTodos,
+        uiState.completedTodos,
+    ) {
+        if (openEditLineIndex < 0) {
+            editTodoRequestHandled = false
+            return@LaunchedEffect
+        }
+        if (editTodoRequestHandled) return@LaunchedEffect
+        if (uiState.isLoading) return@LaunchedEffect
+
+        editTodoRequestHandled = true
+        val todo = (uiState.activeTodos + uiState.completedTodos)
+            .firstOrNull { it.lineIndex == openEditLineIndex }
+            ?: return@LaunchedEffect
+
+        sheetMode = TodoSheetMode.Edit(todo)
+        sheetText = todo.text
+        sheetMeta = MarkdownParser.TasksMeta(
+            dueDate = todo.dueDate,
+            startDate = todo.startDate,
+            scheduledDate = todo.scheduledDate,
+            completionDate = todo.completionDate,
+            createdDate = todo.createdDate,
+            priority = todo.priority,
+            recurrence = todo.recurrence,
+        )
+        sheetParentTodo = null
+    }
 
     if (sheetMode != null) {
         ModalBottomSheet(
@@ -141,6 +208,8 @@ fun CategoryScreen(
             val scrollState = rememberScrollState()
             val todoTextBringIntoView = remember { BringIntoViewRequester() }
             val recurrenceBringIntoView = remember { BringIntoViewRequester() }
+            val todoTextFocusRequester = remember { FocusRequester() }
+            val keyboardController = LocalSoftwareKeyboardController.current
             val titleRes = when (sheetMode) {
                 TodoSheetMode.Add -> R.string.category_add_todo_title
                 is TodoSheetMode.Edit -> R.string.category_edit_todo_title
@@ -153,6 +222,16 @@ fun CategoryScreen(
                 is TodoSheetMode.Edit -> R.string.category_edit_todo_hint
                 TodoSheetMode.AddSubtask -> R.string.category_add_subtask_hint
                 null -> R.string.category_add_todo_hint
+            }
+
+            val shouldFocusTodoText = sheetMode == TodoSheetMode.Add ||
+                sheetMode == TodoSheetMode.AddSubtask
+            LaunchedEffect(sheetMode) {
+                if (!shouldFocusTodoText) return@LaunchedEffect
+                // Wait for the sheet enter animation so focus/IME stick.
+                delay(350)
+                todoTextFocusRequester.requestFocus()
+                keyboardController?.show()
             }
 
             Column(
@@ -175,6 +254,7 @@ fun CategoryScreen(
                     label = { Text(text = stringResource(hintRes)) },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .focusRequester(todoTextFocusRequester)
                         .bringIntoViewRequester(todoTextBringIntoView)
                         .onFocusEvent { focusState ->
                             if (focusState.isFocused) {
@@ -465,13 +545,13 @@ fun CategoryScreen(
         }
 
         val sortedActiveTodos = remember(uiState.activeTodos, settings.todoSort) {
-            sortTodos(uiState.activeTodos, settings.todoSort)
+            TodoSorter.sort(uiState.activeTodos, settings.todoSort)
         }
         val sortedCompletedTodos = remember(uiState.completedTodos, settings.todoSort) {
-            sortTodos(uiState.completedTodos, settings.todoSort)
+            TodoSorter.sort(uiState.completedTodos, settings.todoSort)
         }
         val sortedAllTodos = remember(uiState.activeTodos, uiState.completedTodos, settings.todoSort) {
-            sortTodos(uiState.activeTodos + uiState.completedTodos, settings.todoSort)
+            TodoSorter.sort(uiState.activeTodos + uiState.completedTodos, settings.todoSort)
         }
 
         LazyColumn(
@@ -637,73 +717,6 @@ fun CategoryScreen(
             item { Spacer(modifier = Modifier.height(96.dp)) }
         }
     }
-}
-
-private fun sortTodos(todos: List<Todo>, sort: TodoSort): List<Todo> {
-    return when (sort) {
-        TodoSort.FILE_ORDER -> todos.sortedBy { it.lineIndex }
-        TodoSort.PRIORITY_HIGH_TO_LOW -> sortTodosByPriorityKeepingSubtasks(todos)
-        TodoSort.CREATED_DATE_NEWEST_FIRST ->
-            todos.sortedWith(
-                compareByDescending<Todo> { it.createdDate != null }
-                    .thenByDescending { it.createdDate ?: "" }
-                    .thenBy { it.lineIndex },
-            )
-            
-        TodoSort.DUE_DATE_EARLIEST_FIRST ->
-            todos.sortedWith(
-                compareBy<Todo> { it.dueDate == null }
-                    .thenBy { it.dueDate ?: "" }
-                    .thenBy { it.lineIndex },
-            )
-    }
-}
-
-private data class TodoGroup(
-    val parent: Todo,
-    val children: List<Todo>,
-)
-
-private fun sortTodosByPriorityKeepingSubtasks(todos: List<Todo>): List<Todo> {
-    if (todos.isEmpty()) return todos
-
-    val ordered = todos.sortedBy { it.lineIndex }
-    val groups = ArrayList<TodoGroup>()
-
-    var currentParent: Todo? = null
-    var currentChildren = ArrayList<Todo>()
-
-    fun flushGroup() {
-        val parent = currentParent
-        if (parent != null) {
-            groups.add(TodoGroup(parent = parent, children = currentChildren.toList()))
-        }
-    }
-
-    for (todo in ordered) {
-        if (todo.indentLevel == 0 || currentParent == null) {
-            flushGroup()
-            currentParent = todo
-            currentChildren = ArrayList()
-        } else {
-            currentChildren.add(todo)
-        }
-    }
-
-    flushGroup()
-
-    val sortedGroups = groups.sortedWith(
-        compareByDescending<TodoGroup> { it.parent.priority.priorityRank() }
-            .thenBy { it.parent.lineIndex },
-    )
-
-    val result = ArrayList<Todo>(ordered.size)
-    for (group in sortedGroups) {
-        result.add(group.parent)
-        result.addAll(group.children)
-    }
-
-    return result
 }
 
 private class CategoryViewModelFactory(

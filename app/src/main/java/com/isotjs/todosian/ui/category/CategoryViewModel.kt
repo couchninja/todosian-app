@@ -55,12 +55,15 @@ class CategoryViewModel(
     }
 
     private fun observeExternalChanges() {
+        val folderUri = fileRepository.getFolderUri() ?: return
         @OptIn(FlowPreview::class)
         viewModelScope.launch {
-            fileRepository.observeDocumentChanges(categoryUri)
+            // Watch the whole vault, not only the document URI. Many SAF providers do not
+            // notify ContentObserver on document content changes from external editors.
+            fileRepository.observeMarkdownFilesChanges(folderUri)
                 .debounce(250)
                 .catch {
-                    // TODO: Pull to refresh.
+                    // Best-effort; CategoryScreen also refreshes on STARTED.
                 }
                 .collectLatest {
                     if (inFlightWrites.get() > 0) {

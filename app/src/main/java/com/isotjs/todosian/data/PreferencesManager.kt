@@ -20,11 +20,28 @@ class PreferencesManager(
     }
 
     fun clearFolderUri() {
-        prefs.edit { remove(KEY_FOLDER_URI) }
+        prefs.edit {
+            remove(KEY_FOLDER_URI)
+            remove(KEY_WIDGET_CATEGORY_URI)
+        }
+    }
+
+    fun getWidgetCategoryUri(): String? = prefs.getString(KEY_WIDGET_CATEGORY_URI, null)
+
+    fun setWidgetCategoryUri(uri: String?) {
+        // commit=true: widget ActionCallbacks re-read this immediately; apply() can race.
+        prefs.edit(commit = true) {
+            if (uri.isNullOrBlank()) {
+                remove(KEY_WIDGET_CATEGORY_URI)
+            } else {
+                putString(KEY_WIDGET_CATEGORY_URI, uri)
+            }
+        }
     }
 
     private companion object {
         private const val PREFS_NAME = "todosian_prefs"
         private const val KEY_FOLDER_URI = "folder_uri"
+        private const val KEY_WIDGET_CATEGORY_URI = "widget_category_uri"
     }
 }

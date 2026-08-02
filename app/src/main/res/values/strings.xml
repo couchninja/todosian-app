@@ -219,4 +219,14 @@
     <string name="daily_focus_screen_title">Daily focus</string>
     <string name="daily_focus_empty_title">Nothing due right now</string>
     <string name="daily_focus_empty_subtitle">Tasks matching your focus mode will appear here.</string>
+
+    <!-- Home screen widget -->
+    <string name="widget_categories_name">Todosian</string>
+    <string name="widget_categories_description">Checklist for a Markdown list with quick add. Tap the title to switch lists.</string>
+    <string name="widget_todo_no_folder">Open Todosian to choose a folder.</string>
+    <string name="widget_todo_missing">No Markdown files found in your folder.</string>
+    <string name="widget_todo_empty">No todos yet. Tap + to add one.</string>
+    <string name="widget_todo_error">Could not load this list.</string>
+    <string name="widget_todo_untitled">Untitled task</string>
+    <string name="widget_todo_more">+%1$d more</string>
 </resources>

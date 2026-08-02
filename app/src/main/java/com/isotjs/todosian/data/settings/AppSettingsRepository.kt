@@ -29,8 +29,9 @@ interface AppSettingsRepository {
 class SharedPrefsAppSettingsRepository(
     context: Context,
 ) : AppSettingsRepository {
+    private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     override val settings: Flow<AppSettings> = callbackFlow {
         fun sendCurrent() {

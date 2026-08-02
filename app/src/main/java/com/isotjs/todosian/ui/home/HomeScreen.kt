@@ -107,7 +107,7 @@ fun HomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, viewModel) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            viewModel.refreshIfDirty()
+            viewModel.refreshOnStart()
         }
     }
 

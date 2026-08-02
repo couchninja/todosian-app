@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transparent app mark for the widget header. Uses the launcher foreground
+     webp (not ic_launcher_monochrome) so RemoteViews stays small. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@mipmap/ic_launcher_foreground"
+    android:gravity="fill" />
