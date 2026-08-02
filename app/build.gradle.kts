@@ -67,6 +67,15 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
+        // Same package/signing as debug (easy adb install), with release R8 minify/shrink.
+        create("optimized") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-optimized"
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -81,6 +90,9 @@ android {
 android.sourceSets {
     getByName("debug") {
         res.srcDirs("src/debug/res")
+    }
+    getByName("optimized") {
+        res.srcDirs("src/optimized/res")
     }
 }
 

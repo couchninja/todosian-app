@@ -36,3 +36,10 @@
 -keep class androidx.work.impl.WorkDatabase_Impl { *; }
 -keep class * extends androidx.room.RoomDatabase { *; }
 -keep class * implements androidx.room.RoomDatabase$Callback { *; }
+
+# Glance ActionCallbacks are loaded with Class.forName + zero-arg constructor.
+# glance-appwidget's consumer rule only keeps the class name; R8 still strips <init>(),
+# which breaks widget interactions in minified builds.
+-keepclassmembers class * implements androidx.glance.appwidget.action.ActionCallback {
+    public <init>();
+}
