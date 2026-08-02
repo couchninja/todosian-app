@@ -37,7 +37,6 @@ import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -100,6 +99,7 @@ import com.isotjs.todosian.ui.components.TodoRow
 import com.isotjs.todosian.ui.components.TodoSheetMode
 import com.isotjs.todosian.ui.components.TodosianDimens
 import com.isotjs.todosian.ui.components.TodosianSectionHeader
+import com.isotjs.todosian.ui.components.TodosianUndoButton
 import com.isotjs.todosian.utils.CompletedSectionBuilder
 import com.isotjs.todosian.utils.MarkdownParser
 import com.isotjs.todosian.utils.TodoSorter
@@ -129,6 +129,7 @@ fun CategoryScreen(
         ),
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
 
     val settings by appSettingsRepository.settings.collectAsStateWithLifecycle(
         initialValue = com.isotjs.todosian.data.settings.AppSettings(),
@@ -161,8 +162,6 @@ fun CategoryScreen(
     var sheetText by remember { mutableStateOf("") }
     var sheetMeta by remember { mutableStateOf(MarkdownParser.TasksMeta()) }
     var sheetParentTodo by remember { mutableStateOf<Todo?>(null) }
-    var deleteTodoTarget by remember { mutableStateOf<Todo?>(null) }
-    var deleteTodoHasSubtasks by remember { mutableStateOf(false) }
     var moveTodoTarget by remember { mutableStateOf<Todo?>(null) }
     var showCopyOption by remember { mutableStateOf(false) }
     var addTodoRequestHandled by rememberSaveable(categoryUri, addRequestId) { mutableStateOf(false) }
@@ -380,41 +379,6 @@ fun CategoryScreen(
         }
     }
 
-    if (deleteTodoTarget != null) {
-        val deleteBodyRes = if (deleteTodoHasSubtasks) {
-            R.string.category_delete_todo_body_with_subtasks
-        } else {
-            R.string.category_delete_todo_body
-        }
-        AlertDialog(
-            onDismissRequest = { deleteTodoTarget = null },
-            title = { Text(text = stringResource(R.string.category_delete_todo_title)) },
-            text = { Text(text = stringResource(deleteBodyRes)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val target = deleteTodoTarget
-                        if (target != null) {
-                            viewModel.deleteTodo(target)
-                        }
-                        deleteTodoTarget = null
-                        deleteTodoHasSubtasks = false
-                    },
-                ) {
-                    Text(text = stringResource(R.string.category_delete_todo_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    deleteTodoTarget = null
-                    deleteTodoHasSubtasks = false
-                }) {
-                    Text(text = stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
-
     if (moveTodoTarget != null) {
         ModalBottomSheet(
             onDismissRequest = {
@@ -509,47 +473,48 @@ fun CategoryScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = uiState.title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_navigate_back),
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = uiState.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    sheetMode = TodoSheetMode.Add
-                    sheetText = ""
-                    sheetMeta = if (settings.enableTasksPluginSupport) {
-                        MarkdownParser.TasksMeta(createdDate = LocalDate.now().toString())
-                    } else {
-                        MarkdownParser.TasksMeta()
-                    }
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = stringResource(R.string.cd_add_todo),
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_navigate_back),
+                            )
+                        }
+                    },
                 )
-            }
-        },
-        modifier = modifier.fillMaxSize(),
-    ) { padding ->
+            },
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = {
+                        sheetMode = TodoSheetMode.Add
+                        sheetText = ""
+                        sheetMeta = if (settings.enableTasksPluginSupport) {
+                            MarkdownParser.TasksMeta(createdDate = LocalDate.now().toString())
+                        } else {
+                            MarkdownParser.TasksMeta()
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.cd_add_todo),
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) { padding ->
         if (uiState.isLoading) {
             Box(
                 modifier = Modifier
@@ -820,12 +785,7 @@ fun CategoryScreen(
                     MarkdownParser.TasksMeta()
                 }
             },
-            onRequestDelete = { todo ->
-                deleteTodoTarget = todo
-                val resolvedIndex = MarkdownParser.resolveTodoLineIndex(uiState.lines, todo)
-                    ?: todo.lineIndex
-                deleteTodoHasSubtasks = MarkdownParser.hasSubtasks(uiState.lines, resolvedIndex)
-            },
+            onRequestDelete = { todo -> viewModel.deleteTodo(todo) },
             onRequestMove = { todo -> moveTodoTarget = todo },
         )
 
@@ -912,6 +872,14 @@ fun CategoryScreen(
             }
 
             item { Spacer(modifier = Modifier.height(96.dp)) }
+        }
+        }
+
+        if (canUndo) {
+            TodosianUndoButton(
+                onClick = { viewModel.undoLastChange() },
+                modifier = Modifier.align(Alignment.BottomStart),
+            )
         }
     }
 }

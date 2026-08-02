@@ -22,7 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -68,6 +67,7 @@ import com.isotjs.todosian.ui.components.TodoRow
 import com.isotjs.todosian.ui.components.TodoSheetMode
 import com.isotjs.todosian.ui.components.TodosianDimens
 import com.isotjs.todosian.ui.components.TodosianSectionHeader
+import com.isotjs.todosian.ui.components.TodosianUndoButton
 import com.isotjs.todosian.utils.MarkdownParser
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -96,6 +96,7 @@ fun DailyFocusScreen(
         ),
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, viewModel) {
@@ -123,7 +124,6 @@ fun DailyFocusScreen(
     var sheetText by remember { mutableStateOf("") }
     var sheetMeta by remember { mutableStateOf(MarkdownParser.TasksMeta()) }
     var sheetTask by remember { mutableStateOf<DailyFocusTask?>(null) }
-    var deleteTodoTarget by remember { mutableStateOf<DailyFocusTask?>(null) }
 
     fun dismissSheet() {
         sheetMode = null
@@ -225,47 +225,24 @@ fun DailyFocusScreen(
         }
     }
 
-    if (deleteTodoTarget != null) {
-        AlertDialog(
-            onDismissRequest = { deleteTodoTarget = null },
-            title = { Text(text = stringResource(R.string.category_delete_todo_title)) },
-            text = { Text(text = stringResource(R.string.category_delete_todo_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val target = deleteTodoTarget
-                        if (target != null) viewModel.deleteTodo(target)
-                        deleteTodoTarget = null
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(text = stringResource(R.string.daily_focus_screen_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_navigate_back),
+                            )
+                        }
                     },
-                ) {
-                    Text(text = stringResource(R.string.category_delete_todo_confirm))
-                }
+                )
             },
-            dismissButton = {
-                TextButton(onClick = { deleteTodoTarget = null }) {
-                    Text(text = stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(text = stringResource(R.string.daily_focus_screen_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_navigate_back),
-                        )
-                    }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        modifier = modifier.fillMaxSize(),
-    ) { padding ->
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            modifier = Modifier.fillMaxSize(),
+        ) { padding ->
         if (uiState.isLoading) {
             Box(
                 modifier = Modifier
@@ -345,7 +322,7 @@ fun DailyFocusScreen(
                             sheetTask = task
                         },
                         onAddSubtask = {},
-                        onRequestDelete = { deleteTodoTarget = task },
+                        onRequestDelete = { viewModel.deleteTodo(task) },
                         onRequestMove = null,
                         allowMove = false,
                         showSubtaskButton = false,
@@ -360,6 +337,14 @@ fun DailyFocusScreen(
                 }
             }
             item { Spacer(modifier = Modifier.height(24.dp)) }
+        }
+        }
+
+        if (canUndo) {
+            TodosianUndoButton(
+                onClick = { viewModel.undoLastChange() },
+                modifier = Modifier.align(Alignment.BottomStart),
+            )
         }
     }
 }

@@ -5,21 +5,28 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.isotjs.todosian.R
+import com.isotjs.todosian.data.EXTERNAL_FILE_POLL_MS
 import com.isotjs.todosian.data.FileRepository
 import com.isotjs.todosian.data.model.Todo
 import com.isotjs.todosian.utils.MarkdownParser
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 data class CategoryUiState(
     val isLoading: Boolean = false,
@@ -46,8 +53,14 @@ class CategoryViewModel(
     private val _events = MutableSharedFlow<Event>()
     val events = _events.asSharedFlow()
 
+    val canUndo: StateFlow<Boolean> = fileRepository.undoStack
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val inFlightWrites = AtomicInteger(0)
     private val pendingRefreshFromObserver = AtomicBoolean(false)
+    /** Last lines we successfully wrote; used to avoid treating our own writes as external edits. */
+    private val lastWrittenLines = AtomicReference<List<String>?>(null)
 
     init {
         observeExternalChanges()
@@ -73,6 +86,19 @@ class CategoryViewModel(
                     refreshFromDisk(showLoading = false)
                 }
         }
+        // SAF ContentObservers are unreliable for many providers; poll last-modified like the widget.
+        viewModelScope.launch {
+            var lastModified: Long? = null
+            while (isActive) {
+                delay(EXTERNAL_FILE_POLL_MS)
+                if (inFlightWrites.get() > 0) continue
+                val modified = fileRepository.getLastModified(categoryUri).getOrNull() ?: continue
+                if (lastModified != null && modified != lastModified) {
+                    refreshFromDisk(showLoading = false)
+                }
+                lastModified = modified
+            }
+        }
     }
 
     fun load() {
@@ -97,6 +123,12 @@ class CategoryViewModel(
 
             val lines = linesResult.getOrThrow()
             if (!showLoading && lines == _uiState.value.lines) return@launch
+
+            // Disk differs from UI. Clear undo only for changes we did not just write ourselves.
+            if (!showLoading && lines != lastWrittenLines.get()) {
+                fileRepository.clearUndoBackups()
+            }
+            markWritten(lines)
 
             val todos = MarkdownParser.parse(lines)
             val (completed, active) = todos.partition { it.isDone }
@@ -162,12 +194,18 @@ class CategoryViewModel(
 
             inFlightWrites.incrementAndGet()
             try {
-                val write = fileRepository.writeLines(categoryUri, newLines)
+                val write = fileRepository.writeLines(
+                    uri = categoryUri,
+                    lines = newLines,
+                    backupForUndo = previousLines,
+                )
                 if (write.isFailure) {
                     if (_uiState.value.lines == newLines) {
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -202,6 +240,8 @@ class CategoryViewModel(
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -240,6 +280,8 @@ class CategoryViewModel(
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -283,6 +325,8 @@ class CategoryViewModel(
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -304,12 +348,38 @@ class CategoryViewModel(
 
             inFlightWrites.incrementAndGet()
             try {
-                val write = fileRepository.writeLines(categoryUri, newLines)
+                val write = fileRepository.writeLines(
+                    uri = categoryUri,
+                    lines = newLines,
+                    backupForUndo = previousLines,
+                )
                 if (write.isFailure) {
                     if (_uiState.value.lines == newLines) {
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
+                }
+            } finally {
+                onWriteFinishedMaybeRefresh()
+            }
+        }
+    }
+
+    fun undoLastChange() {
+        viewModelScope.launch {
+            inFlightWrites.incrementAndGet()
+            try {
+                val backup = fileRepository.restoreUndoBackup().getOrElse {
+                    _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                    return@launch
+                }
+                if (backup.uri == categoryUri) {
+                    applyLines(backup.lines)
+                    markWritten(backup.lines)
+                } else {
+                    refreshFromDisk(showLoading = false)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -402,12 +472,18 @@ class CategoryViewModel(
 
             inFlightWrites.incrementAndGet()
             try {
-                val write = fileRepository.writeLines(categoryUri, newLines)
+                val write = fileRepository.writeLines(
+                    uri = categoryUri,
+                    lines = newLines,
+                    backupForUndo = previousLines,
+                )
                 if (write.isFailure) {
                     if (_uiState.value.lines == newLines) {
                         applyLines(previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -446,6 +522,7 @@ class CategoryViewModel(
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
                 } else {
+                    markWritten(newLines)
                     _events.emit(Event.ShowMessage(R.string.category_move_success))
                 }
             } finally {
@@ -475,6 +552,10 @@ class CategoryViewModel(
         if (remaining == 0 && pendingRefreshFromObserver.getAndSet(false)) {
             refreshFromDisk(showLoading = false)
         }
+    }
+
+    private fun markWritten(lines: List<String>) {
+        lastWrittenLines.set(lines)
     }
 
     private fun applyLines(lines: List<String>) {

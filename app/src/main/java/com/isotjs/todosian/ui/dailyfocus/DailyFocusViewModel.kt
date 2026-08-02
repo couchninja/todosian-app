@@ -6,24 +6,31 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.isotjs.todosian.R
+import com.isotjs.todosian.data.EXTERNAL_FILE_POLL_MS
 import com.isotjs.todosian.data.FileRepository
 import com.isotjs.todosian.data.model.Todo
 import com.isotjs.todosian.data.model.priorityRank
 import com.isotjs.todosian.data.settings.DailyFocusMode
 import com.isotjs.todosian.utils.MarkdownParser
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 data class DailyFocusTask(
     val todo: Todo,
@@ -51,8 +58,13 @@ class DailyFocusViewModel(
     private val _events = MutableSharedFlow<Event>()
     val events = _events.asSharedFlow()
 
+    val canUndo: StateFlow<Boolean> = fileRepository.undoStack
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val inFlightWrites = AtomicInteger(0)
     private val pendingRefreshFromObserver = AtomicBoolean(false)
+    private val lastWrittenByUri = AtomicReference<Map<String, List<String>>>(emptyMap())
 
     init {
         observeExternalChanges()
@@ -73,6 +85,30 @@ class DailyFocusViewModel(
                     }
                     refreshFromDisk(showLoading = false)
                 }
+        }
+        viewModelScope.launch {
+            var lastModifiedByUri = emptyMap<String, Long>()
+            while (isActive) {
+                delay(EXTERNAL_FILE_POLL_MS)
+                if (inFlightWrites.get() > 0) continue
+                val uris = _uiState.value.lineCache.keys
+                if (uris.isEmpty()) continue
+                var changed = false
+                val next = HashMap<String, Long>(uris.size)
+                for (uriString in uris) {
+                    val modified = fileRepository.getLastModified(uriString.toUri()).getOrNull()
+                        ?: continue
+                    next[uriString] = modified
+                    val previous = lastModifiedByUri[uriString]
+                    if (previous != null && previous != modified) {
+                        changed = true
+                    }
+                }
+                lastModifiedByUri = next
+                if (changed) {
+                    refreshFromDisk(showLoading = false)
+                }
+            }
         }
     }
 
@@ -117,6 +153,17 @@ class DailyFocusViewModel(
                     }
             }
 
+            val previousCache = _uiState.value.lineCache
+            val lastWritten = lastWrittenByUri.get()
+            val externallyChanged = !showLoading && previousCache.any { (uriKey, previousLines) ->
+                val diskLines = lineCache[uriKey] ?: return@any false
+                diskLines != previousLines && diskLines != lastWritten[uriKey]
+            }
+            if (externallyChanged) {
+                fileRepository.clearUndoBackups()
+            }
+            lastWrittenByUri.set(lineCache.toMap())
+
             _uiState.value = DailyFocusUiState(
                 isLoading = false,
                 tasks = sortTasks(tasks),
@@ -144,12 +191,18 @@ class DailyFocusViewModel(
 
             inFlightWrites.incrementAndGet()
             try {
-                val write = fileRepository.writeLines(task.categoryUri, newLines)
+                val write = fileRepository.writeLines(
+                    uri = task.categoryUri,
+                    lines = newLines,
+                    backupForUndo = previousLines,
+                )
                 if (write.isFailure) {
                     if (currentLinesFor(task) == newLines) {
                         applyLines(task.categoryUri, previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(task.categoryUri, newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -192,6 +245,8 @@ class DailyFocusViewModel(
                         applyLines(task.categoryUri, previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(task.categoryUri, newLines)
                 }
             } finally {
                 onWriteFinishedMaybeRefresh()
@@ -213,13 +268,35 @@ class DailyFocusViewModel(
 
             inFlightWrites.incrementAndGet()
             try {
-                val write = fileRepository.writeLines(task.categoryUri, newLines)
+                val write = fileRepository.writeLines(
+                    uri = task.categoryUri,
+                    lines = newLines,
+                    backupForUndo = previousLines,
+                )
                 if (write.isFailure) {
                     if (currentLinesFor(task) == newLines) {
                         applyLines(task.categoryUri, previousLines)
                     }
                     _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                } else {
+                    markWritten(task.categoryUri, newLines)
                 }
+            } finally {
+                onWriteFinishedMaybeRefresh()
+            }
+        }
+    }
+
+    fun undoLastChange() {
+        viewModelScope.launch {
+            inFlightWrites.incrementAndGet()
+            try {
+                val backup = fileRepository.restoreUndoBackup().getOrElse {
+                    _events.emit(Event.ShowMessage(R.string.error_write_failed))
+                    return@launch
+                }
+                applyLines(backup.uri, backup.lines)
+                markWritten(backup.uri, backup.lines)
             } finally {
                 onWriteFinishedMaybeRefresh()
             }
@@ -232,6 +309,15 @@ class DailyFocusViewModel(
 
     private fun currentLinesFor(task: DailyFocusTask): List<String> =
         _uiState.value.lineCache[task.categoryUri.toString()] ?: emptyList()
+
+    private fun markWritten(uri: Uri, lines: List<String>) {
+        val key = uri.toString()
+        while (true) {
+            val current = lastWrittenByUri.get()
+            val updated = current + (key to lines)
+            if (lastWrittenByUri.compareAndSet(current, updated)) return
+        }
+    }
 
     // Replicates the logic from refreshFromDisk but only for a single file, used for optimistic updates after mutations.
     private fun applyLines(categoryUri: Uri, newLines: List<String>) {

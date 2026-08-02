@@ -17,6 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -24,7 +27,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
+/** Max in-memory undo snapshots kept across the app. */
+const val MAX_UNDO_BACKUPS = 3
+
+/** Poll interval for detecting external markdown edits while a screen is open. */
+internal const val EXTERNAL_FILE_POLL_MS = 2_000L
+
+/** Undo snapshot of a markdown file's full contents. */
+data class FileUndoBackup(
+    val uri: Uri,
+    val lines: List<String>,
+)
+
 interface FileRepository {
+    /** Undo stack (oldest → newest). At most [MAX_UNDO_BACKUPS] entries. */
+    val undoStack: StateFlow<List<FileUndoBackup>>
+
     fun getFolderUri(): Uri?
 
     fun clearFolderUri()
@@ -42,7 +60,23 @@ interface FileRepository {
 
     suspend fun getFolderDisplayName(folderUri: Uri): Result<String>
 
-    suspend fun writeLines(uri: Uri, lines: List<String>): Result<Unit>
+    /**
+     * Writes [lines] to [uri].
+     *
+     * When [backupForUndo] is non-null and the write succeeds, it is pushed onto the undo stack
+     * (capped at [MAX_UNDO_BACKUPS]). When null, the undo stack is cleared.
+     */
+    suspend fun writeLines(
+        uri: Uri,
+        lines: List<String>,
+        backupForUndo: List<String>? = null,
+    ): Result<Unit>
+
+    /** Pops and restores the newest undo snapshot. */
+    suspend fun restoreUndoBackup(): Result<FileUndoBackup>
+
+    /** Drops all undo snapshots (e.g. after an external file edit). */
+    fun clearUndoBackups()
 
     suspend fun createCategory(folderUri: Uri, name: String): Result<Uri>
 
@@ -65,6 +99,9 @@ class SafFileRepository(
     private val appContext: Context,
     private val preferencesManager: PreferencesManager,
 ) : FileRepository {
+
+    private val _undoStack = MutableStateFlow<List<FileUndoBackup>>(emptyList())
+    override val undoStack: StateFlow<List<FileUndoBackup>> = _undoStack.asStateFlow()
 
     override fun getFolderUri(): Uri? = preferencesManager.getFolderUri()
 
@@ -161,14 +198,48 @@ class SafFileRepository(
         }
     }
 
-    override suspend fun writeLines(uri: Uri, lines: List<String>): Result<Unit> {
+    override suspend fun writeLines(
+        uri: Uri,
+        lines: List<String>,
+        backupForUndo: List<String>?,
+    ): Result<Unit> {
         return withContext(Dispatchers.IO) {
             runCatching {
                 writeLinesInternal(uri, lines)
             }
         }.onSuccess {
+            if (backupForUndo != null) {
+                pushUndoBackup(FileUndoBackup(uri = uri, lines = backupForUndo.toList()))
+            } else {
+                clearUndoBackups()
+            }
             CategoriesWidgetUpdater.requestUpdate(appContext)
         }
+    }
+
+    override suspend fun restoreUndoBackup(): Result<FileUndoBackup> {
+        val stack = _undoStack.value
+        if (stack.isEmpty()) {
+            return Result.failure(IllegalStateException("No undo backup"))
+        }
+        val backup = stack.last()
+        val remaining = stack.dropLast(1)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                writeLinesInternal(backup.uri, backup.lines)
+            }
+        }.onSuccess {
+            _undoStack.value = remaining
+            CategoriesWidgetUpdater.requestUpdate(appContext)
+        }.map { backup }
+    }
+
+    override fun clearUndoBackups() {
+        _undoStack.value = emptyList()
+    }
+
+    private fun pushUndoBackup(backup: FileUndoBackup) {
+        _undoStack.value = (_undoStack.value + backup).takeLast(MAX_UNDO_BACKUPS)
     }
 
     override suspend fun createCategory(folderUri: Uri, name: String): Result<Uri> {
@@ -209,6 +280,7 @@ class SafFileRepository(
                 if (renamed == null) throw IllegalStateException("Unable to rename document")
             }
         }.onSuccess {
+            clearUndoBackups()
             CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
@@ -222,6 +294,7 @@ class SafFileRepository(
                 if (!ok) throw IllegalStateException("Unable to delete file")
             }
         }.onSuccess {
+            clearUndoBackups()
             CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
@@ -241,6 +314,7 @@ class SafFileRepository(
                 writeLinesInternal(targetUri, updated.second)
             }
         }.onSuccess {
+            clearUndoBackups()
             CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
@@ -259,6 +333,7 @@ class SafFileRepository(
                 writeLinesInternal(targetUri, updated.second)
             }
         }.onSuccess {
+            clearUndoBackups()
             CategoriesWidgetUpdater.requestUpdate(appContext)
         }
     }
