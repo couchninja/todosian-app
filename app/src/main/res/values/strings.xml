@@ -162,6 +162,8 @@
     <string name="settings_dynamic_color">Dynamic color</string>
     <string name="settings_dynamic_color_subtitle">Use system-derived colors (Android 12+).</string>
     <string name="settings_dynamic_color_unavailable">Available on Android 12+ only.</string>
+    <string name="settings_compact_todo_list">Compact task list</string>
+    <string name="settings_compact_todo_list_subtitle">Show denser rows on the category task list.</string>
 
     <string name="settings_behaviour">Behaviour</string>
     <string name="settings_show_daily_focus">Daily focus banner</string>

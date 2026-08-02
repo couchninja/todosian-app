@@ -349,13 +349,14 @@ fun DailyFocusScreen(
                         onRequestMove = null,
                         allowMove = false,
                         showSubtaskButton = false,
+                        compact = settings.compactTodoList,
                         modifier = Modifier.animateItem(
                             fadeInSpec = tween(durationMillis = 180),
                             placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
                             fadeOutSpec = tween(durationMillis = 160),
                         ),
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(if (settings.compactTodoList) 2.dp else 8.dp))
                 }
             }
             item { Spacer(modifier = Modifier.height(24.dp)) }

@@ -783,6 +783,7 @@ fun CategoryScreen(
         val todoActions = TodoListActions(
             enableTasksPluginSupport = settings.enableTasksPluginSupport,
             useEmojisInUi = settings.tasksPluginUseEmojisInUi,
+            compact = settings.compactTodoList,
             onToggle = { todo -> viewModel.toggleTodo(todo, settings.enableTasksPluginSupport) },
             onEdit = { todo ->
                 sheetMode = TodoSheetMode.Edit(todo)
@@ -926,6 +927,7 @@ fun CategoryScreen(
 private data class TodoListActions(
     val enableTasksPluginSupport: Boolean,
     val useEmojisInUi: Boolean,
+    val compact: Boolean,
     val onToggle: (Todo) -> Unit,
     val onEdit: (Todo) -> Unit,
     val onAddSubtask: (Todo) -> Unit,
@@ -937,6 +939,7 @@ private fun LazyListScope.flatTodoItems(
     todos: List<Todo>,
     actions: TodoListActions,
 ) {
+    val itemSpacing = if (actions.compact) 2.dp else 8.dp
     items(
         items = todos,
         key = { it.id },
@@ -951,7 +954,7 @@ private fun LazyListScope.flatTodoItems(
                 fadeOutSpec = tween(durationMillis = 160),
             ),
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(itemSpacing))
     }
 }
 
@@ -1040,7 +1043,7 @@ private fun LazyListScope.draggableTodoItems(
                         )
                     },
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(if (actions.compact) 2.dp else 8.dp))
             }
             // Overlay so the indicator does not open a layout gap.
             if (showLineAbove) {
@@ -1092,6 +1095,7 @@ private fun CategoryTodoRow(
         onRequestMove = { actions.onRequestMove(todo) },
         // Keep swipe enabled with the reorder handle: horizontal dismiss vs long-press vertical drag.
         dragHandleModifier = dragHandleModifier,
+        compact = actions.compact,
         modifier = modifier,
     )
 }

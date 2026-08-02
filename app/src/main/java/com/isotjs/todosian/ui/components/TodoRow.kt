@@ -88,8 +88,22 @@ fun TodoRow(
     showSubtaskButton: Boolean = true,
     dragHandleModifier: Modifier? = null,
     enableSwipe: Boolean = true,
+    compact: Boolean = false,
 ) {
-    val indentPadding = (todo.indentLevel * 12).coerceAtMost(48).dp
+    val indentStep = if (compact) 8 else 12
+    val indentMax = if (compact) 32 else 48
+    val indentPadding = (todo.indentLevel * indentStep).coerceAtMost(indentMax).dp
+    val rowCorner = if (compact) 8.dp else 16.dp
+    val rowHorizontalPadding = if (compact) 8.dp else 12.dp
+    val rowVerticalPadding = if (compact) 2.dp else 10.dp
+    val rowSpacing = if (compact) 6.dp else 12.dp
+    val textStyle = if (compact) {
+        MaterialTheme.typography.bodyMedium
+    } else {
+        MaterialTheme.typography.bodyLarge
+    }
+    val chipIconSize = if (compact) 14.dp else 18.dp
+    val actionSize = if (compact) 32.dp else 40.dp
     // confirmValueChange is captured once by rememberSwipeToDismissBoxState; keep
     // callbacks/todo current so swipe-delete/move cannot target a stale lineIndex.
     val currentOnRequestDelete by rememberUpdatedState(onRequestDelete)
@@ -144,9 +158,9 @@ fun TodoRow(
                     .fillMaxSize()
                     .background(
                         color = backgroundColor,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(rowCorner),
                     )
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = if (compact) 12.dp else 16.dp),
                 contentAlignment = alignment,
             ) {
                 Icon(
@@ -161,10 +175,10 @@ fun TodoRow(
             }
         },
         content = {
-            val rowShape = RoundedCornerShape(16.dp)
+            val rowShape = RoundedCornerShape(rowCorner)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(rowSpacing),
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -173,7 +187,7 @@ fun TodoRow(
                     )
                     .clip(rowShape)
                     .clickable(onClick = onEdit)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = rowHorizontalPadding, vertical = rowVerticalPadding),
             ) {
                 Checkbox(
                     checked = todo.isDone,
@@ -195,29 +209,31 @@ fun TodoRow(
                     val priorityColor = priorityColorFor(todo.priority)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
                     ) {
                         if (priorityColor != null) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(if (compact) 6.dp else 8.dp)
                                     .background(color = priorityColor, shape = CircleShape),
                             )
                         }
                         Text(
                             text = todo.text,
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = textStyle,
                             textDecoration = if (todo.isDone) TextDecoration.LineThrough else TextDecoration.None,
                             color = textColor,
+                            maxLines = if (compact) 2 else Int.MAX_VALUE,
+                            overflow = if (compact) TextOverflow.Ellipsis else TextOverflow.Clip,
                         )
                     }
 
                     if (enableTasksPluginSupport) {
                         val chips = buildTasksMetaChips(todo = todo, useEmojisInUi = useEmojisInUi)
                         if (chips.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
@@ -239,14 +255,18 @@ fun TodoRow(
                                                 Icon(
                                                     imageVector = icon,
                                                     contentDescription = null,
-                                                    modifier = Modifier.size(18.dp),
+                                                    modifier = Modifier.size(chipIconSize),
                                                 )
                                             }
                                         },
                                         label = {
                                             Text(
                                                 text = chip.label,
-                                                style = MaterialTheme.typography.labelMedium,
+                                                style = if (compact) {
+                                                    MaterialTheme.typography.labelSmall
+                                                } else {
+                                                    MaterialTheme.typography.labelMedium
+                                                },
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
@@ -258,7 +278,10 @@ fun TodoRow(
                     }
                 }
                 if (showSubtaskButton && todo.indentLevel < 2) {
-                    IconButton(onClick = onAddSubtask) {
+                    IconButton(
+                        onClick = onAddSubtask,
+                        modifier = Modifier.size(actionSize),
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.SubdirectoryArrowRight,
                             contentDescription = stringResource(R.string.cd_add_subtask),
@@ -283,7 +306,7 @@ fun TodoRow(
                         LocalViewConfiguration provides shortPressViewConfiguration,
                     ) {
                         Box(
-                            modifier = dragHandleModifier.size(40.dp),
+                            modifier = dragHandleModifier.size(actionSize),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(

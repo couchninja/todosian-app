@@ -3,6 +3,7 @@ package com.isotjs.todosian.data.settings
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColorEnabled: Boolean = true,
+    val compactTodoList: Boolean = false,
     val showDailyFocus: Boolean = true,
     val dailyFocusMode: DailyFocusMode = DailyFocusMode.TODAY,
     val categorySort: CategorySort = CategorySort.A_Z,

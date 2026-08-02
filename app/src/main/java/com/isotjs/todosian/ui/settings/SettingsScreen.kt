@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.ViewCompact
 import androidx.compose.material.icons.filled.ViewDay
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -429,6 +430,23 @@ fun SettingsScreen(
                                 checked = settings.dynamicColorEnabled,
                                 onCheckedChange = { appSettingsRepository.setDynamicColorEnabled(it) },
                                 enabled = dynamicEnabled,
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    ListItem(
+                        headlineContent = { Text(text = stringResource(R.string.settings_compact_todo_list)) },
+                        supportingContent = {
+                            Text(text = stringResource(R.string.settings_compact_todo_list_subtitle))
+                        },
+                        leadingContent = { Icon(imageVector = Icons.Filled.ViewCompact, contentDescription = null) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.compactTodoList,
+                                onCheckedChange = { appSettingsRepository.setCompactTodoList(it) },
                             )
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
