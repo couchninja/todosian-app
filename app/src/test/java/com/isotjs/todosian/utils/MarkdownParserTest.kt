@@ -1080,6 +1080,116 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun tryIndentTodo_nests_under_previous_sibling() {
+        val lines = listOf(
+            "- [ ] A",
+            "- [ ] B",
+            "- [ ] C",
+        )
+
+        val updated = MarkdownParser.tryIndentTodo(lines, lineIndex = 1)
+            ?: error("Expected indent to succeed")
+
+        assertEquals(
+            listOf(
+                "- [ ] A",
+                "  - [ ] B",
+                "- [ ] C",
+            ),
+            updated,
+        )
+    }
+
+    @Test
+    fun tryIndentTodo_rewrites_nested_block() {
+        val lines = listOf(
+            "- [ ] A",
+            "- [ ] B",
+            "  - [ ] B1",
+            "notes under B",
+        )
+
+        val updated = MarkdownParser.tryIndentTodo(lines, lineIndex = 1)
+            ?: error("Expected indent to succeed")
+
+        assertEquals(
+            listOf(
+                "- [ ] A",
+                "  - [ ] B",
+                "    - [ ] B1",
+                "notes under B",
+            ),
+            updated,
+        )
+    }
+
+    @Test
+    fun tryIndentTodo_rejects_first_item_and_max_depth() {
+        val lines = listOf(
+            "- [ ] A",
+            "  - [ ] A1",
+            "    - [ ] A1a",
+            "- [ ] B",
+        )
+
+        assertEquals(null, MarkdownParser.tryIndentTodo(lines, lineIndex = 0))
+        assertEquals(null, MarkdownParser.tryIndentTodo(lines, lineIndex = 1)) // no sibling at level 1
+        assertEquals(null, MarkdownParser.tryIndentTodo(lines, lineIndex = 2)) // already max depth
+        assertEquals(true, MarkdownParser.canIndentTodo(lines, lineIndex = 3))
+        assertEquals(false, MarkdownParser.canOutdentTodo(lines, lineIndex = 0))
+        assertEquals(true, MarkdownParser.canOutdentTodo(lines, lineIndex = 1))
+    }
+
+    @Test
+    fun tryOutdentTodo_reduces_indent_and_nested_children() {
+        val lines = listOf(
+            "- [ ] A",
+            "  - [ ] B",
+            "    - [ ] B1",
+            "  - [ ] C",
+        )
+
+        val updated = MarkdownParser.tryOutdentTodo(lines, lineIndex = 1)
+            ?: error("Expected outdent to succeed")
+
+        assertEquals(
+            listOf(
+                "- [ ] A",
+                "- [ ] B",
+                "  - [ ] B1",
+                "  - [ ] C",
+            ),
+            updated,
+        )
+    }
+
+    @Test
+    fun tryOutdentTodo_rejects_top_level() {
+        val lines = listOf("- [ ] Alone")
+        assertEquals(null, MarkdownParser.tryOutdentTodo(lines, lineIndex = 0))
+        assertEquals(false, MarkdownParser.canOutdentTodo(lines, lineIndex = 0))
+    }
+
+    @Test
+    fun tryOutdentTodo_uses_tab_indent_unit() {
+        val lines = listOf(
+            "\t- [ ] Parent",
+            "\t\t- [ ] Child",
+        )
+
+        val updated = MarkdownParser.tryOutdentTodo(lines, lineIndex = 1)
+            ?: error("Expected outdent to succeed")
+
+        assertEquals(
+            listOf(
+                "\t- [ ] Parent",
+                "\t- [ ] Child",
+            ),
+            updated,
+        )
+    }
+
+    @Test
     fun addSubTodo_inserts_after_notes_under_parent() {
         val lines = listOf(
             "- [ ] Parent",

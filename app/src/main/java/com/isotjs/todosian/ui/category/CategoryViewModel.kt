@@ -348,11 +348,47 @@ class CategoryViewModel(
         }
     }
 
+    /** Indents [todo] one level under its previous sibling. Invokes [onUpdated] with the new todo. */
+    fun indentTodo(todo: Todo, onUpdated: (Todo) -> Unit = {}) {
+        changeTodoIndent(todo, onUpdated, MarkdownParser::tryIndentTodo)
+    }
+
+    /** Outdents [todo] one level. Invokes [onUpdated] with the new todo. */
+    fun outdentTodo(todo: Todo, onUpdated: (Todo) -> Unit = {}) {
+        changeTodoIndent(todo, onUpdated, MarkdownParser::tryOutdentTodo)
+    }
+
+    private fun changeTodoIndent(
+        todo: Todo,
+        onUpdated: (Todo) -> Unit,
+        transform: (List<String>, Int) -> List<String>?,
+    ) {
+        var mutatedLineIndex: Int? = null
+        applySilentLineMutation(
+            onApplied = { newLines ->
+                mutatedLineIndex?.let { lineIndex ->
+                    MarkdownParser.parse(newLines)
+                        .firstOrNull { it.lineIndex == lineIndex }
+                        ?.let(onUpdated)
+                }
+            },
+        ) { lines ->
+            val lineIndex = MarkdownParser.resolveTodoLineIndex(lines, todo)
+                ?: return@applySilentLineMutation null
+            mutatedLineIndex = lineIndex
+            // Not applicable → same list (silent no-op). Missing todo → null (refresh).
+            transform(lines, lineIndex) ?: lines
+        }
+    }
+
     /**
      * Applies a line mutation that fails closed with a silent refresh (not a read-error toast).
      * Used for drag-reorder where null means stale indices / hierarchy mismatch.
      */
-    private fun applySilentLineMutation(mutate: (List<String>) -> List<String>?) {
+    private fun applySilentLineMutation(
+        onApplied: ((List<String>) -> Unit)? = null,
+        mutate: (List<String>) -> List<String>?,
+    ) {
         viewModelScope.launch {
             val previousLines = _uiState.value.lines
             val newLines = mutate(previousLines) ?: run {
@@ -362,6 +398,7 @@ class CategoryViewModel(
             if (newLines == previousLines) return@launch
 
             applyLines(newLines)
+            onApplied?.invoke(newLines)
 
             inFlightWrites.incrementAndGet()
             try {

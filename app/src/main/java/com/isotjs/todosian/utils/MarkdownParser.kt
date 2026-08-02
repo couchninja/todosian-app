@@ -6,6 +6,9 @@ import java.time.LocalDate
 import java.util.UUID
 
 object MarkdownParser {
+    /** Matches the deepest nesting the UI allows when adding subtasks. */
+    const val MAX_TODO_INDENT_LEVEL = 2
+
     private val todoRegex = Regex("""^([ \t]*)- \[(x| )\] (.*)$""")
 
     private val dueSuffixRegex = Regex("""\s📅\s(\d{4}-\d{2}-\d{2})\s*$""")
@@ -353,6 +356,102 @@ object MarkdownParser {
     }
 
     /**
+     * True when [lineIndex] can be indented one level under its previous same-level sibling,
+     * without exceeding [maxIndentLevel].
+     */
+    fun canIndentTodo(
+        lines: List<String>,
+        lineIndex: Int,
+        maxIndentLevel: Int = MAX_TODO_INDENT_LEVEL,
+    ): Boolean {
+        if (lineIndex !in lines.indices) return false
+        val match = todoRegex.matchEntire(lines[lineIndex]) ?: return false
+        val currentLevel = indentLevel(match.groupValues[1])
+        if (currentLevel >= maxIndentLevel) return false
+        return findPreviousSiblingAtLevel(lines, lineIndex, currentLevel) != null
+    }
+
+    fun canIndentTodo(
+        lines: List<String>,
+        todo: Todo,
+        maxIndentLevel: Int = MAX_TODO_INDENT_LEVEL,
+    ): Boolean {
+        val lineIndex = resolveTodoLineIndex(lines, todo) ?: return false
+        return canIndentTodo(lines, lineIndex, maxIndentLevel)
+    }
+
+    /** True when [lineIndex] is nested and can be outdented one level. */
+    fun canOutdentTodo(lines: List<String>, lineIndex: Int): Boolean {
+        if (lineIndex !in lines.indices) return false
+        val match = todoRegex.matchEntire(lines[lineIndex]) ?: return false
+        val prefix = match.groupValues[1]
+        if (indentLevel(prefix) <= 0) return false
+        return prefix.endsWith(inferIndentUnit(prefix))
+    }
+
+    fun canOutdentTodo(lines: List<String>, todo: Todo): Boolean {
+        val lineIndex = resolveTodoLineIndex(lines, todo) ?: return false
+        return canOutdentTodo(lines, lineIndex)
+    }
+
+    /**
+     * Indents the todo block at [lineIndex] one level under the previous same-level sibling.
+     * Nested todos and notes in the block move with it (indent prefixes rewritten in place).
+     * Returns null when there is no previous sibling or nesting would exceed [maxIndentLevel].
+     */
+    fun tryIndentTodo(
+        lines: List<String>,
+        lineIndex: Int,
+        maxIndentLevel: Int = MAX_TODO_INDENT_LEVEL,
+    ): List<String>? {
+        if (lineIndex !in lines.indices) return null
+        val match = todoRegex.matchEntire(lines[lineIndex]) ?: return null
+        val oldRootPrefix = match.groupValues[1]
+        val currentLevel = indentLevel(oldRootPrefix)
+        if (currentLevel >= maxIndentLevel) return null
+
+        val previousSibling = findPreviousSiblingAtLevel(lines, lineIndex, currentLevel) ?: return null
+        val siblingMatch = todoRegex.matchEntire(lines[previousSibling]) ?: return null
+        val parentIndentPrefix = siblingMatch.groupValues[1]
+        val newRootPrefix = parentIndentPrefix + inferIndentUnit(parentIndentPrefix)
+        // Tab units are wider than two spaces, so level may jump by more than 1.
+        if (indentLevel(newRootPrefix) <= currentLevel) return null
+
+        return rewriteTodoBlockIndent(
+            lines = lines,
+            lineIndex = lineIndex,
+            oldRootPrefix = oldRootPrefix,
+            newRootPrefix = newRootPrefix,
+        )
+    }
+
+    /**
+     * Outdents the todo block at [lineIndex] one level.
+     * Nested todos and notes in the block move with it (indent prefixes rewritten in place).
+     * Returns null when the todo is already top-level.
+     */
+    fun tryOutdentTodo(lines: List<String>, lineIndex: Int): List<String>? {
+        if (lineIndex !in lines.indices) return null
+        val match = todoRegex.matchEntire(lines[lineIndex]) ?: return null
+        val oldRootPrefix = match.groupValues[1]
+        val currentLevel = indentLevel(oldRootPrefix)
+        if (currentLevel <= 0) return null
+
+        val indentUnit = inferIndentUnit(oldRootPrefix)
+        if (!oldRootPrefix.endsWith(indentUnit)) return null
+        val newRootPrefix = oldRootPrefix.removeSuffix(indentUnit)
+        // Tab units are wider than two spaces, so level may drop by more than 1.
+        if (indentLevel(newRootPrefix) >= currentLevel) return null
+
+        return rewriteTodoBlockIndent(
+            lines = lines,
+            lineIndex = lineIndex,
+            oldRootPrefix = oldRootPrefix,
+            newRootPrefix = newRootPrefix,
+        )
+    }
+
+    /**
      * Reorders todo blocks among [orderedLineIndices] using list-move semantics
      * (`add(toIndex, removeAt(fromIndex))`).
      *
@@ -594,6 +693,46 @@ object MarkdownParser {
             val rewrittenPrefix = newRootPrefix + prefix.removePrefix(oldRootPrefix)
             rewrittenPrefix + line.substring(prefix.length)
         }
+    }
+
+    private fun rewriteTodoBlockIndent(
+        lines: List<String>,
+        lineIndex: Int,
+        oldRootPrefix: String,
+        newRootPrefix: String,
+    ): List<String>? {
+        val blockEnd = todoBlockEnd(lines, lineIndex) ?: return null
+        val rewrittenBlock = rewriteBlockIndentPrefixes(
+            block = lines.subList(lineIndex, blockEnd).toList(),
+            oldRootPrefix = oldRootPrefix,
+            newRootPrefix = newRootPrefix,
+        )
+        return lines.toMutableList().apply {
+            subList(lineIndex, blockEnd).clear()
+            addAll(lineIndex, rewrittenBlock)
+        }
+    }
+
+    /**
+     * Nearest preceding todo at exactly [level]. Returns null when a shallower todo is
+     * encountered first (no same-level sibling above this item).
+     */
+    private fun findPreviousSiblingAtLevel(
+        lines: List<String>,
+        lineIndex: Int,
+        level: Int,
+    ): Int? {
+        var index = lineIndex - 1
+        while (index >= 0) {
+            val match = todoRegex.matchEntire(lines[index])
+            if (match != null) {
+                val indent = indentLevel(match.groupValues[1])
+                if (indent == level) return index
+                if (indent < level) return null
+            }
+            index--
+        }
+        return null
     }
 
     fun editTodo(

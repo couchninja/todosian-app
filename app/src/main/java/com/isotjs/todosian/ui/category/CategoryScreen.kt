@@ -32,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
+import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Folder
@@ -166,6 +168,20 @@ fun CategoryScreen(
     var addTodoRequestHandled by rememberSaveable(categoryUri, addRequestId) { mutableStateOf(false) }
     var editTodoRequestHandled by rememberSaveable(categoryUri, editRequestId) { mutableStateOf(false) }
 
+    fun openEditSheet(todo: Todo, isGhost: Boolean = false) {
+        sheetMode = TodoSheetMode.Edit(todo, isGhost = isGhost)
+        sheetText = todo.text
+        sheetMeta = todo.toTasksMeta()
+        sheetParentTodo = null
+    }
+
+    fun clearTodoSheet() {
+        sheetMode = null
+        sheetText = ""
+        sheetMeta = MarkdownParser.TasksMeta()
+        sheetParentTodo = null
+    }
+
     LaunchedEffect(openAddTodo, categoryUri, addRequestId) {
         if (!openAddTodo) {
             addTodoRequestHandled = false
@@ -199,28 +215,12 @@ fun CategoryScreen(
             .firstOrNull { it.lineIndex == openEditLineIndex }
             ?: return@LaunchedEffect
 
-        sheetMode = TodoSheetMode.Edit(todo)
-        sheetText = todo.text
-        sheetMeta = MarkdownParser.TasksMeta(
-            dueDate = todo.dueDate,
-            startDate = todo.startDate,
-            scheduledDate = todo.scheduledDate,
-            completionDate = todo.completionDate,
-            createdDate = todo.createdDate,
-            priority = todo.priority,
-            recurrence = todo.recurrence,
-        )
-        sheetParentTodo = null
+        openEditSheet(todo)
     }
 
     if (sheetMode != null) {
         ModalBottomSheet(
-            onDismissRequest = {
-                sheetMode = null
-                sheetText = ""
-                sheetMeta = MarkdownParser.TasksMeta()
-                sheetParentTodo = null
-            },
+            onDismissRequest = { clearTodoSheet() },
             sheetState = todoSheetState,
         ) {
             val scrollState = rememberScrollState()
@@ -260,10 +260,33 @@ fun CategoryScreen(
                     .padding(bottom = 16.dp)
                     .verticalScroll(scrollState),
             ) {
-                Text(
-                    text = stringResource(titleRes),
-                    style = MaterialTheme.typography.titleLarge,
-                )
+                val editMode = sheetMode as? TodoSheetMode.Edit
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(titleRes),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (editMode != null && !editMode.isGhost) {
+                        TodoIndentButtons(
+                            todo = editMode.todo,
+                            lines = uiState.lines,
+                            onOutdent = { todo ->
+                                viewModel.outdentTodo(todo) { updated ->
+                                    sheetMode = TodoSheetMode.Edit(updated, isGhost = editMode.isGhost)
+                                }
+                            },
+                            onIndent = { todo ->
+                                viewModel.indentTodo(todo) { updated ->
+                                    sheetMode = TodoSheetMode.Edit(updated, isGhost = editMode.isGhost)
+                                }
+                            },
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = sheetText,
@@ -306,10 +329,7 @@ fun CategoryScreen(
                         onClick = {
                             scope.launch {
                                 todoSheetState.hide()
-                                sheetMode = null
-                                sheetText = ""
-                                sheetMeta = MarkdownParser.TasksMeta()
-                                sheetParentTodo = null
+                                clearTodoSheet()
                             }
                         },
                     ) {
@@ -348,10 +368,7 @@ fun CategoryScreen(
                             }
                             scope.launch {
                                 todoSheetState.hide()
-                                sheetMode = null
-                                sheetText = ""
-                                sheetMeta = MarkdownParser.TasksMeta()
-                                sheetParentTodo = null
+                                clearTodoSheet()
                             }
                         },
                         enabled = sheetText.trim().isNotEmpty(),
@@ -792,19 +809,7 @@ fun CategoryScreen(
             onUncompleteTree = { todo ->
                 viewModel.uncompleteTodoTree(todo, settings.enableTasksPluginSupport)
             },
-            onEdit = { todo ->
-                sheetMode = TodoSheetMode.Edit(todo)
-                sheetText = todo.text
-                sheetMeta = MarkdownParser.TasksMeta(
-                    dueDate = todo.dueDate,
-                    startDate = todo.startDate,
-                    scheduledDate = todo.scheduledDate,
-                    completionDate = todo.completionDate,
-                    createdDate = todo.createdDate,
-                    priority = todo.priority,
-                    recurrence = todo.recurrence,
-                )
-            },
+            onEdit = { todo, isGhost -> openEditSheet(todo, isGhost = isGhost) },
             onAddSubtask = { todo ->
                 sheetMode = TodoSheetMode.AddSubtask
                 sheetParentTodo = todo
@@ -917,7 +922,7 @@ private data class TodoListActions(
     val compact: Boolean,
     val onToggle: (Todo) -> Unit,
     val onUncompleteTree: (Todo) -> Unit,
-    val onEdit: (Todo) -> Unit,
+    val onEdit: (Todo, isGhost: Boolean) -> Unit,
     val onAddSubtask: (Todo) -> Unit,
     val onRequestDelete: (Todo) -> Unit,
     val onRequestMove: (Todo) -> Unit,
@@ -1091,6 +1096,45 @@ private fun DropIndicatorLine(
 }
 
 @Composable
+private fun TodoIndentButtons(
+    todo: Todo,
+    lines: List<String>,
+    onOutdent: (Todo) -> Unit,
+    onIndent: (Todo) -> Unit,
+) {
+    IconButton(
+        onClick = { onOutdent(todo) },
+        enabled = MarkdownParser.canOutdentTodo(lines, todo),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.FormatIndentDecrease,
+            contentDescription = stringResource(R.string.cd_outdent_todo),
+        )
+    }
+    IconButton(
+        onClick = { onIndent(todo) },
+        enabled = MarkdownParser.canIndentTodo(lines, todo),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.FormatIndentIncrease,
+            contentDescription = stringResource(R.string.cd_indent_todo),
+        )
+    }
+}
+
+private fun Todo.toTasksMeta(): MarkdownParser.TasksMeta {
+    return MarkdownParser.TasksMeta(
+        dueDate = dueDate,
+        startDate = startDate,
+        scheduledDate = scheduledDate,
+        completionDate = completionDate,
+        createdDate = createdDate,
+        priority = priority,
+        recurrence = recurrence,
+    )
+}
+
+@Composable
 private fun CategoryTodoRow(
     todo: Todo,
     actions: TodoListActions,
@@ -1111,7 +1155,7 @@ private fun CategoryTodoRow(
                 actions.onToggle(todo)
             }
         },
-        onEdit = { actions.onEdit(todo) },
+        onEdit = { actions.onEdit(todo, isGhost) },
         onAddSubtask = { actions.onAddSubtask(todo) },
         onRequestDelete = { actions.onRequestDelete(todo) },
         onRequestMove = if (isGhost) null else { { actions.onRequestMove(todo) } },

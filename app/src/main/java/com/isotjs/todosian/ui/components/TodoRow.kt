@@ -342,7 +342,7 @@ private fun TodoRowBody(
                 }
             }
         }
-        if (showSubtaskButton && todo.indentLevel < 2) {
+        if (showSubtaskButton && todo.indentLevel < MarkdownParser.MAX_TODO_INDENT_LEVEL) {
             IconButton(
                 onClick = onAddSubtask,
                 modifier = Modifier.size(actionSize),
@@ -482,7 +482,7 @@ fun TasksMetaEditor(
 
 sealed interface TodoSheetMode {
     data object Add : TodoSheetMode
-    data class Edit(val todo: Todo) : TodoSheetMode
+    data class Edit(val todo: Todo, val isGhost: Boolean = false) : TodoSheetMode
     data object AddSubtask : TodoSheetMode
 }
 
