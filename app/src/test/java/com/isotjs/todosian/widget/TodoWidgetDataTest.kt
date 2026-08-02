@@ -139,6 +139,33 @@ class TodoWidgetDataTest {
     }
 
     @Test
+    fun applyToggle_completing_parent_completes_nested_subtasks() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "  - [ ] Child",
+            "    - [ ] Grandchild",
+            "- [ ] Sibling",
+        )
+
+        val checked = TodoWidgetData.applyToggle(
+            lines = lines,
+            lineIndex = 0,
+            targetChecked = true,
+            enableTasksPlugin = false,
+        )!!
+
+        assertEquals(
+            listOf(
+                "- [x] Parent",
+                "  - [x] Child",
+                "    - [x] Grandchild",
+                "- [ ] Sibling",
+            ),
+            checked,
+        )
+    }
+
+    @Test
     fun applyToggle_returns_null_for_stale_line_after_delete() {
         val lines = listOf(
             "- [ ] First",

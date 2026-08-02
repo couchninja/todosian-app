@@ -61,27 +61,20 @@ object MarkdownParser {
         val indentPrefix = match.groupValues[1]
         val isDone = match.groupValues[2] == "x"
         val remainder = match.groupValues[3]
-        val newMark = if (isDone) " " else "x"
+        val targetDone = !isDone
 
-        val todayStr = today.toString()
+        val updatedLines = setLineDone(
+            lines = lines,
+            lineIndex = lineIndex,
+            done = targetDone,
+            enableTasksPlugin = enableTasksPlugin,
+            today = today,
+        )
 
-        val newRemainder = if (!enableTasksPlugin) {
-            remainder
-        } else {
-            val withoutDoneDate = removeCompletionDate(remainder)
-            if (!isDone) {
-                withoutDoneDate + " ✅ $todayStr"
-            } else {
-                withoutDoneDate
-            }
-        }
-
-        val newLine = "$indentPrefix- [$newMark] ${newRemainder.trimEnd()}"
-        val updatedLines = lines.toMutableList().apply {
-            this[lineIndex] = newLine
-        }
-        
-        if (!isDone && enableTasksPlugin) {
+        // Completing a recurring task inserts the next occurrence above the done line.
+        var rootIndex = lineIndex
+        var result = updatedLines
+        if (targetDone && enableTasksPlugin) {
             val parsed = parseRemainder(remainder)
             val rule = parsed.meta.recurrence
             if (!rule.isNullOrBlank()) {
@@ -93,14 +86,22 @@ object MarkdownParser {
                     today = today,
                 )
                 if (nextLine != null) {
-                    return updatedLines.toMutableList().apply {
+                    result = updatedLines.toMutableList().apply {
                         add(lineIndex, nextLine)
                     }
+                    rootIndex = lineIndex + 1
                 }
             }
         }
 
-        return updatedLines
+        // Cascade the new done state to nested subtasks (and their children).
+        return cascadeDoneToDescendants(
+            lines = result,
+            rootIndex = rootIndex,
+            done = targetDone,
+            enableTasksPlugin = enableTasksPlugin,
+            today = today,
+        )
     }
 
     fun tryToggleLine(
@@ -486,6 +487,64 @@ object MarkdownParser {
             index++
         }
         return index
+    }
+
+    /**
+     * Sets a single todo line to [done] without cascading or recurrence.
+     * No-ops when already at the target state.
+     */
+    private fun setLineDone(
+        lines: List<String>,
+        lineIndex: Int,
+        done: Boolean,
+        enableTasksPlugin: Boolean,
+        today: LocalDate,
+    ): List<String> {
+        if (lineIndex !in lines.indices) return lines
+        val match = todoRegex.matchEntire(lines[lineIndex]) ?: return lines
+
+        val indentPrefix = match.groupValues[1]
+        val isDone = match.groupValues[2] == "x"
+        if (isDone == done) return lines
+
+        val remainder = match.groupValues[3]
+        val newMark = if (done) "x" else " "
+        val newRemainder = if (!enableTasksPlugin) {
+            remainder
+        } else {
+            val withoutDoneDate = removeCompletionDate(remainder)
+            if (done) withoutDoneDate + " ✅ $today" else withoutDoneDate
+        }
+
+        val newLine = "$indentPrefix- [$newMark] ${newRemainder.trimEnd()}"
+        return lines.toMutableList().apply { this[lineIndex] = newLine }
+    }
+
+    /**
+     * Applies [done] to every nested todo under [rootIndex] (subtasks and deeper).
+     * Does not trigger recurrence on descendants — only the explicitly toggled root does.
+     * Non-todo lines and siblings outside the block are left unchanged.
+     */
+    private fun cascadeDoneToDescendants(
+        lines: List<String>,
+        rootIndex: Int,
+        done: Boolean,
+        enableTasksPlugin: Boolean,
+        today: LocalDate,
+    ): List<String> {
+        val blockEnd = todoBlockEnd(lines, rootIndex) ?: return lines
+        var result = lines
+        for (index in (rootIndex + 1) until blockEnd) {
+            if (!isTodoLine(result[index])) continue
+            result = setLineDone(
+                lines = result,
+                lineIndex = index,
+                done = done,
+                enableTasksPlugin = enableTasksPlugin,
+                today = today,
+            )
+        }
+        return result
     }
 
     /**

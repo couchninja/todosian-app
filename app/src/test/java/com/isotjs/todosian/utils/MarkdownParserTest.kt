@@ -83,6 +83,199 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun toggleLine_completing_parent_completes_nested_subtasks() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "  - [ ] Child",
+            "    - [ ] Grandchild",
+            "- [ ] Sibling",
+        )
+
+        val toggled = MarkdownParser.toggleLine(lines, lineIndex = 0, enableTasksPlugin = false)
+
+        assertEquals(
+            listOf(
+                "- [x] Parent",
+                "  - [x] Child",
+                "    - [x] Grandchild",
+                "- [ ] Sibling",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_completing_subtask_completes_its_children_only() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "  - [ ] Child",
+            "    - [ ] Grandchild",
+            "  - [ ] Other child",
+        )
+
+        val toggled = MarkdownParser.toggleLine(lines, lineIndex = 1, enableTasksPlugin = false)
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent",
+                "  - [x] Child",
+                "    - [x] Grandchild",
+                "  - [ ] Other child",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_uncompleting_parent_uncompletes_nested_subtasks() {
+        val lines = listOf(
+            "- [x] Parent",
+            "  - [x] Child",
+            "    - [x] Grandchild",
+            "- [x] Sibling",
+        )
+
+        val toggled = MarkdownParser.toggleLine(lines, lineIndex = 0, enableTasksPlugin = false)
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent",
+                "  - [ ] Child",
+                "    - [ ] Grandchild",
+                "- [x] Sibling",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_uncompleting_subtask_uncompletes_its_children_only() {
+        val lines = listOf(
+            "- [x] Parent",
+            "  - [x] Child",
+            "    - [x] Grandchild",
+            "  - [x] Other child",
+        )
+
+        val toggled = MarkdownParser.toggleLine(lines, lineIndex = 1, enableTasksPlugin = false)
+
+        assertEquals(
+            listOf(
+                "- [x] Parent",
+                "  - [ ] Child",
+                "    - [ ] Grandchild",
+                "  - [x] Other child",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_cascade_preserves_notes_and_skips_already_matching() {
+        val lines = listOf(
+            "- [ ] Parent",
+            "note under parent",
+            "  - [x] Already done",
+            "  child note",
+            "  - [ ] Open child",
+            "- [ ] Sibling",
+        )
+
+        val toggled = MarkdownParser.toggleLine(lines, lineIndex = 0, enableTasksPlugin = false)
+
+        assertEquals(
+            listOf(
+                "- [x] Parent",
+                "note under parent",
+                "  - [x] Already done",
+                "  child note",
+                "  - [x] Open child",
+                "- [ ] Sibling",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_cascade_with_tasks_plugin_adds_done_dates_to_descendants() {
+        val today = LocalDate.of(2024, 3, 15)
+        val lines = listOf(
+            "- [ ] Parent 📅 2024-03-14",
+            "  - [ ] Child 🔼",
+            "    - [ ] Grandchild",
+        )
+
+        val toggled = MarkdownParser.toggleLine(
+            lines = lines,
+            lineIndex = 0,
+            enableTasksPlugin = true,
+            today = today,
+        )
+
+        assertEquals(
+            listOf(
+                "- [x] Parent 📅 2024-03-14 ✅ 2024-03-15",
+                "  - [x] Child 🔼 ✅ 2024-03-15",
+                "    - [x] Grandchild ✅ 2024-03-15",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_cascade_with_tasks_plugin_removes_done_dates_from_descendants() {
+        val today = LocalDate.of(2024, 3, 15)
+        val lines = listOf(
+            "- [x] Parent ✅ 2024-03-14",
+            "  - [x] Child 🔼 ✅ 2024-03-10",
+            "    - [x] Grandchild ✅ 2024-03-01",
+        )
+
+        val toggled = MarkdownParser.toggleLine(
+            lines = lines,
+            lineIndex = 0,
+            enableTasksPlugin = true,
+            today = today,
+        )
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent",
+                "  - [ ] Child 🔼",
+                "    - [ ] Grandchild",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
+    fun toggleLine_cascade_after_recurring_complete_keeps_children_under_done_instance() {
+        val today = LocalDate.of(2024, 3, 15)
+        val lines = listOf(
+            "- [ ] Parent 📅 2024-03-14 🔁 every day",
+            "  - [ ] Child",
+            "    - [ ] Grandchild",
+        )
+
+        val toggled = MarkdownParser.toggleLine(
+            lines = lines,
+            lineIndex = 0,
+            enableTasksPlugin = true,
+            today = today,
+        )
+
+        assertEquals(
+            listOf(
+                "- [ ] Parent 📅 2024-03-15 🔁 every day",
+                "- [x] Parent 📅 2024-03-14 🔁 every day ✅ 2024-03-15",
+                "  - [x] Child ✅ 2024-03-15",
+                "    - [x] Grandchild ✅ 2024-03-15",
+            ),
+            toggled,
+        )
+    }
+
+    @Test
     fun addTodo_appends_todo_line() {
         val lines = listOf(
             "# Notes",
