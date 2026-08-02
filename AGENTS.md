@@ -18,9 +18,11 @@ Todosian/
 │   │   │   │   ├── FileRepository.kt
 │   │   │   │   └── PreferencesManager.kt
 │   │   │   ├── notifications/   # Due reminders (WorkManager)
+│   │   │   ├── widget/          # Home-screen category checklist (Glance)
 │   │   │   ├── ui/
 │   │   │   │   ├── category/
 │   │   │   │   ├── components/
+│   │   │   │   ├── dailyfocus/
 │   │   │   │   ├── home/
 │   │   │   │   ├── onboarding/
 │   │   │   │   ├── settings/
@@ -169,6 +171,13 @@ When preparing for a release:
 2. Reminders are tied to Tasks plugin support (enabled in Settings).
 3. Android 13+ requires `POST_NOTIFICATIONS` to show reminders.
 4. No network permission is used.
+
+## Home-screen checklist widget (Glance)
+
+1. The widget uses Jetpack Glance. `LazyColumn` becomes a RemoteViews `ListView`.
+2. **Do not render uncapped todo lists.** Cap visible rows. Large interactive lists inflate binder transactions (~700KB+); the launcher then drops later updates (title cycling and toggles appear broken even when callbacks run).
+3. Use a small header drawable (`ic_widget_app` = launcher foreground webp), not `ic_launcher_monochrome` — complex vectors are inlined into RemoteViews and balloon payload size.
+4. After ActionCallbacks that change widget content, publish state then schedule `GlanceAppWidget.update` *after* the callback returns so SessionWorkers are not cancelled mid-flight.
 
 ## Resource Management
 
